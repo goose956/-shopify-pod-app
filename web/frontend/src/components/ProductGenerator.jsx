@@ -108,6 +108,8 @@ export function ProductGenerator() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState("");
   const [winningPrompt, setWinningPrompt] = useState("");
+  const [winningProductType, setWinningProductType] = useState("tshirt");
+  const [winningPublishImmediately, setWinningPublishImmediately] = useState(false);
 
   const handleProductTypeChange = useCallback((value) => setProductType(value), []);
   const handleLifestyleImageCountChange = useCallback((value) => {
@@ -129,8 +131,13 @@ export function ProductGenerator() {
 
   const productTypeOptions = [
     { label: "T-shirt", value: "tshirt" },
+    { label: "Hoodie", value: "hoodie" },
+    { label: "Sweatshirt", value: "sweatshirt" },
     { label: "Mug", value: "mug" },
     { label: "Poster", value: "poster" },
+    { label: "Canvas Print", value: "canvas" },
+    { label: "Phone Case", value: "phonecase" },
+    { label: "Tote Bag", value: "totebag" },
   ];
   const lifestyleCountOptions = ["1", "2", "3", "4", "5", "6"].map((v) => ({ label: v, value: v }));
 
@@ -190,11 +197,7 @@ export function ProductGenerator() {
     }
   };
 
-  const handleUseAsPrompt = useCallback(() => {
-    if (analysisResult) {
-      setPrompt(analysisResult);
-    }
-  }, [analysisResult]);
+  const handleWinningProductTypeChange = useCallback((value) => setWinningProductType(value), []);
 
   const handleGenerateDesign = async () => {
     setError(null);
@@ -470,12 +473,8 @@ export function ProductGenerator() {
                       multiline={3}
                       autoComplete="off"
                     />
-                    <InlineGrid columns={{ xs: 1, sm: 2 }} gap="400">
-                      <Select label="Product type" options={productTypeOptions} onChange={handleProductTypeChange} value={productType} />
-                      <div style={{ paddingTop: 24 }}>
-                        <Checkbox label="Publish to Shopify immediately" checked={publishImmediately} onChange={setPublishImmediately} />
-                      </div>
-                    </InlineGrid>
+                    <Select label="Product type" options={productTypeOptions} onChange={handleProductTypeChange} value={productType} />
+                    <Checkbox label="Publish to Shopify immediately" checked={publishImmediately} onChange={setPublishImmediately} />
                     {inputMode === "describe" && (
                       <Button submit variant="primary" loading={isGeneratingDesign} disabled={!prompt.trim() || isWorking} size="large">
                         Generate Design
@@ -590,6 +589,8 @@ export function ProductGenerator() {
                         autoComplete="off"
                         helpText="Generated from your image. Edit before generating."
                       />
+                      <Select label="Product type" options={productTypeOptions} onChange={handleWinningProductTypeChange} value={winningProductType} />
+                      <Checkbox label="Publish to Shopify immediately" checked={winningPublishImmediately} onChange={setWinningPublishImmediately} />
                       <InlineStack gap="300">
                         {inputMode === "winning" && (
                           <Button
@@ -597,9 +598,48 @@ export function ProductGenerator() {
                             loading={isGeneratingDesign}
                             disabled={!winningPrompt.trim() || isWorking}
                             size="large"
-                            onClick={() => {
-                              setPrompt(winningPrompt);
-                              setTimeout(() => handleGenerateDesign(), 0);
+                            onClick={async () => {
+                              setError(null);
+                              setDesignImageUrl("");
+                              setDesignId("");
+                              setLifestyleImages([]);
+                              setListingCopy(null);
+                              setTransparentArtworkUrl("");
+                              setFinalProduct(null);
+                              setProviderStatus(null);
+                              const requestedCount = Math.max(1, Math.min(6, Number(lifestyleImageCount) || 3));
+                              setLifestylePrompts(
+                                Array.from({ length: requestedCount }, (_, i) => buildDefaultLifestylePrompt(winningProductType, i))
+                              );
+                              setProductType(winningProductType);
+                              setPublishImmediately(winningPublishImmediately);
+                              setIsGeneratingDesign(true);
+                              try {
+                                const sessionToken = await getSessionToken();
+                                const response = await fetch("/api/design-preview", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
+                                  body: JSON.stringify({ prompt: winningPrompt, productType: winningProductType, publishImmediately: winningPublishImmediately }),
+                                });
+                                if (!response.ok) {
+                                  const data = await response.json().catch(() => ({}));
+                                  throw new Error(data.error || "Failed to generate design preview.");
+                                }
+                                const data = await response.json();
+                                setDesignId(data.designId);
+                                setDesignImageUrl(data.designImageUrl);
+                                setProviderStatus((prev) => ({
+                                  ...(prev || {}),
+                                  designImage: data.provider?.designImage || "unknown",
+                                  message: data.provider?.message || "",
+                                }));
+                                setPrompt(winningPrompt);
+                                setSelectedTab(1);
+                              } catch (err) {
+                                setError(err.message || "Failed to generate design preview.");
+                              } finally {
+                                setIsGeneratingDesign(false);
+                              }
                             }}
                           >
                             Generate from Winning Product
