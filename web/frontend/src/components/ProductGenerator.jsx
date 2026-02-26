@@ -37,6 +37,17 @@ function buildDefaultLifestylePrompt(productType, index) {
   return defaults[index] || `${productType} lifestyle scene variation ${index + 1}`;
 }
 
+function openImageFullSize(url) {
+  if (!url) return;
+  // For data URIs or blob URLs, create a new window with an embedded img tag
+  // since window.open(dataUri) shows blank in most browsers
+  const win = window.open("", "_blank");
+  if (win) {
+    win.document.write(`<!DOCTYPE html><html><head><title>Full Size Image</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1a1a1a;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${url}" alt="Full size" /></body></html>`);
+    win.document.close();
+  }
+}
+
 function ImagePreviewCard({ imageUrl, label, size = "medium", onOpen }) {
   const widths = { small: 120, medium: 200, large: 280 };
   const w = widths[size] || widths.medium;
@@ -688,7 +699,7 @@ export function ProductGenerator() {
                   imageUrl={designImageUrl}
                   label="Generated design"
                   size="large"
-                  onOpen={() => window.open(designImageUrl, "_blank")}
+                  onOpen={() => openImageFullSize(designImageUrl)}
                 />
                 <BlockStack gap="300" style={{ flex: 1, minWidth: 220 }}>
                   <Text variant="headingSm" as="h3">Request a change</Text>
@@ -810,7 +821,7 @@ export function ProductGenerator() {
                     imageUrl={imageUrl}
                     label={`Lifestyle ${index + 1}`}
                     size="medium"
-                    onOpen={() => window.open(imageUrl, "_blank")}
+                    onOpen={() => openImageFullSize(imageUrl)}
                   />
                 ))}
               </div>
