@@ -281,6 +281,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     const prompt = String(req.body?.prompt || "").trim();
     const productType = String(req.body?.productType || "mug").trim().toLowerCase();
+    const imageShape = String(req.body?.imageShape || "square").trim().toLowerCase();
     const publishImmediately = Boolean(req.body?.publishImmediately);
 
     if (!prompt) {
@@ -295,6 +296,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         openAiApiKey: settings?.openAiApiKey || "",
         keiAiApiKey: settings?.keiAiApiKey || "",
         kieGenerateUrl: settings?.kieGenerateUrl,
+        imageShape,
         maxWaitMs: 30000,
         pollIntervalMs: 2500,
       });

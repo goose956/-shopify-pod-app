@@ -96,23 +96,49 @@ class PodPipelineService {
     );
   }
 
-  async requestKieImage({ prompt, inputImageUrl, keiAiApiKey, generateUrl, maxWaitMs, pollIntervalMs }) {
+  // Map shape name to OpenAI size string
+  getOpenAiSize(imageShape) {
+    const sizeMap = {
+      square: "1024x1024",
+      portrait: "1024x1536",
+      landscape: "1536x1024",
+      tall_portrait: "1024x1536",
+      wide_landscape: "1536x1024",
+    };
+    return sizeMap[imageShape] || "1024x1024";
+  }
+
+  // Map shape name to KIE aspect ratio string
+  getKieAspectRatio(imageShape) {
+    const ratioMap = {
+      square: "1:1",
+      portrait: "3:4",
+      landscape: "4:3",
+      tall_portrait: "2:3",
+      wide_landscape: "3:2",
+    };
+    return ratioMap[imageShape] || "1:1";
+  }
+
+  async requestKieImage({ prompt, inputImageUrl, keiAiApiKey, generateUrl, imageShape, maxWaitMs, pollIntervalMs }) {
     const targetUrl = String(generateUrl || "").trim() || "https://api.kie.ai/api/v1/gpt4o-image/generate";
     const recordInfoUrl = this.deriveKieRecordInfoUrl(targetUrl);
     const isFlux = targetUrl.includes("/flux/kontext/");
     const is4o = targetUrl.includes("/gpt4o-image/");
 
+    const kieRatio = this.getKieAspectRatio(imageShape);
+
     const requestBody = isFlux
       ? {
           prompt,
-          aspectRatio: "1:1",
+          aspectRatio: kieRatio,
           model: "flux-kontext-pro",
           ...(inputImageUrl ? { inputImage: inputImageUrl } : {}),
         }
       : is4o
         ? {
             prompt,
-            size: "1:1",
+            size: kieRatio,
             nVariants: 1,
             isEnhance: true,
             enableFallback: true,
@@ -120,7 +146,7 @@ class PodPipelineService {
           }
         : {
             prompt,
-            size: "1:1",
+            size: kieRatio,
             nVariants: 1,
             ...(inputImageUrl ? { filesUrl: [inputImageUrl] } : {}),
           };
@@ -278,7 +304,7 @@ class PodPipelineService {
     }
   }
 
-  async generateDesignImage({ artworkPrompt, openAiApiKey, keiAiApiKey, kieGenerateUrl, referenceImageUrl, maxWaitMs, pollIntervalMs }) {
+  async generateDesignImage({ artworkPrompt, openAiApiKey, keiAiApiKey, kieGenerateUrl, referenceImageUrl, imageShape, maxWaitMs, pollIntervalMs }) {
     if (this.isUsableApiKey(openAiApiKey)) {
       let openAiImageUrl = null;
       let usedReferenceImage = false;
@@ -300,6 +326,7 @@ class PodPipelineService {
         openAiImageUrl = await this.generateOpenAiImage({
           prompt: openAiPrompt,
           openAiApiKey,
+          imageShape,
         });
       }
 
@@ -330,6 +357,7 @@ class PodPipelineService {
         inputImageUrl: referenceImageUrl,
         keiAiApiKey,
         generateUrl: kieGenerateUrl,
+        imageShape,
         maxWaitMs,
         pollIntervalMs,
       });
@@ -348,10 +376,12 @@ class PodPipelineService {
     }
   }
 
-  async generateOpenAiImage({ prompt, openAiApiKey }) {
+  async generateOpenAiImage({ prompt, openAiApiKey, imageShape }) {
     if (!this.isUsableApiKey(openAiApiKey)) {
       return null;
     }
+
+    const openAiSize = this.getOpenAiSize(imageShape);
 
     const attemptGeneration = async (model, extraBody = {}) => {
       const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -360,7 +390,7 @@ class PodPipelineService {
           "Content-Type": "application/json",
           Authorization: `Bearer ${openAiApiKey}`,
         },
-        body: JSON.stringify({ model, prompt, size: "1024x1024", ...extraBody }),
+        body: JSON.stringify({ model, prompt, size: openAiSize, ...extraBody }),
       });
       return response;
     };

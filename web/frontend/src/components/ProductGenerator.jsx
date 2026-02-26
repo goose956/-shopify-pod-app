@@ -83,6 +83,7 @@ export function ProductGenerator() {
   const [selectedTab, setSelectedTab] = useState(0);
   const [prompt, setPrompt] = useState("");
   const [productType, setProductType] = useState("tshirt");
+  const [imageShape, setImageShape] = useState("square");
   const [publishImmediately, setPublishImmediately] = useState(false);
   const [isGeneratingDesign, setIsGeneratingDesign] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
@@ -109,9 +110,11 @@ export function ProductGenerator() {
   const [analysisResult, setAnalysisResult] = useState("");
   const [winningPrompt, setWinningPrompt] = useState("");
   const [winningProductType, setWinningProductType] = useState("tshirt");
+  const [winningImageShape, setWinningImageShape] = useState("square");
   const [winningPublishImmediately, setWinningPublishImmediately] = useState(false);
 
   const handleProductTypeChange = useCallback((value) => setProductType(value), []);
+  const handleImageShapeChange = useCallback((value) => setImageShape(value), []);
   const handleLifestyleImageCountChange = useCallback((value) => {
     const nextCount = Math.max(1, Math.min(6, Number(value) || 1));
     setLifestyleImageCount(String(nextCount));
@@ -138,6 +141,13 @@ export function ProductGenerator() {
     { label: "Canvas Print", value: "canvas" },
     { label: "Phone Case", value: "phonecase" },
     { label: "Tote Bag", value: "totebag" },
+  ];
+  const imageShapeOptions = [
+    { label: "Square (1:1)", value: "square" },
+    { label: "Portrait (3:4)", value: "portrait" },
+    { label: "Landscape (4:3)", value: "landscape" },
+    { label: "Tall Portrait (2:3)", value: "tall_portrait" },
+    { label: "Wide Landscape (3:2)", value: "wide_landscape" },
   ];
   const lifestyleCountOptions = ["1", "2", "3", "4", "5", "6"].map((v) => ({ label: v, value: v }));
 
@@ -198,6 +208,7 @@ export function ProductGenerator() {
   };
 
   const handleWinningProductTypeChange = useCallback((value) => setWinningProductType(value), []);
+  const handleWinningImageShapeChange = useCallback((value) => setWinningImageShape(value), []);
 
   const handleGenerateDesign = async () => {
     setError(null);
@@ -218,7 +229,7 @@ export function ProductGenerator() {
       const response = await fetch("/api/design-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
-        body: JSON.stringify({ prompt, productType, publishImmediately }),
+        body: JSON.stringify({ prompt, productType, imageShape, publishImmediately }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -474,6 +485,7 @@ export function ProductGenerator() {
                       autoComplete="off"
                     />
                     <Select label="Product type" options={productTypeOptions} onChange={handleProductTypeChange} value={productType} />
+                    <Select label="Image shape" options={imageShapeOptions} onChange={handleImageShapeChange} value={imageShape} />
                     <Checkbox label="Publish to Shopify immediately" checked={publishImmediately} onChange={setPublishImmediately} />
                     {inputMode === "describe" && (
                       <Button submit variant="primary" loading={isGeneratingDesign} disabled={!prompt.trim() || isWorking} size="large">
@@ -590,6 +602,7 @@ export function ProductGenerator() {
                         helpText="Generated from your image. Edit before generating."
                       />
                       <Select label="Product type" options={productTypeOptions} onChange={handleWinningProductTypeChange} value={winningProductType} />
+                      <Select label="Image shape" options={imageShapeOptions} onChange={handleWinningImageShapeChange} value={winningImageShape} />
                       <Checkbox label="Publish to Shopify immediately" checked={winningPublishImmediately} onChange={setWinningPublishImmediately} />
                       <InlineStack gap="300">
                         {inputMode === "winning" && (
@@ -612,6 +625,7 @@ export function ProductGenerator() {
                                 Array.from({ length: requestedCount }, (_, i) => buildDefaultLifestylePrompt(winningProductType, i))
                               );
                               setProductType(winningProductType);
+                              setImageShape(winningImageShape);
                               setPublishImmediately(winningPublishImmediately);
                               setIsGeneratingDesign(true);
                               try {
@@ -619,7 +633,7 @@ export function ProductGenerator() {
                                 const response = await fetch("/api/design-preview", {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
-                                  body: JSON.stringify({ prompt: winningPrompt, productType: winningProductType, publishImmediately: winningPublishImmediately }),
+                                  body: JSON.stringify({ prompt: winningPrompt, productType: winningProductType, imageShape: winningImageShape, publishImmediately: winningPublishImmediately }),
                                 });
                                 if (!response.ok) {
                                   const data = await response.json().catch(() => ({}));
