@@ -1,0 +1,22 @@
+{
+  "name": "pod-shopify-minimal-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal Shopify embedded UI + Railway backend for POD workflow",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "node backend/index.js",
+    "dev:frontend": "npm --prefix web/frontend run dev",
+    "build": "npm --prefix web/frontend run build",
+    "start": "node backend/index.js"
+  },
+  "dependencies": {
+    "@shopify/shopify-api": "^11.11.1",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

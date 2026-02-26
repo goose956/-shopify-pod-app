@@ -1,0 +1,662 @@
+const express = require("express");
+
+function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService }) {
+  const router = express.Router();
+
+  async function resolveSession(req) {
+    const shopifySession = await authService.validateRequest(req);
+    if (shopifySession?.shopDomain) {
+      return {
+        ...shopifySession,
+        authType: "shopify",
+      };
+    }
+
+    const memberSession = await memberAuthService.validateRequest(req);
+    if (memberSession?.shopDomain) {
+      return {
+        ...memberSession,
+        subject: memberSession.memberId,
+        authType: "member",
+      };
+    }
+
+    return null;
+  }
+
+  async function requireSession(req, res) {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      res.status(401).json({ error: "Invalid or missing session token" });
+      return null;
+    }
+
+    return session;
+  }
+
+  router.post("/members/register", async (req, res) => {
+    try {
+      const member = await memberAuthService.register({
+        email: req.body?.email,
+        fullName: req.body?.fullName,
+        password: req.body?.password,
+      });
+      return res.status(201).json({ member });
+    } catch (error) {
+      return res.status(400).json({ error: error instanceof Error ? error.message : "Failed to register member" });
+    }
+  });
+
+  router.post("/members/login", async (req, res) => {
+    try {
+      const result = await memberAuthService.login({
+        email: req.body?.email,
+        password: req.body?.password,
+      });
+      return res.json(result);
+    } catch (error) {
+      return res.status(401).json({ error: error instanceof Error ? error.message : "Failed to login" });
+    }
+  });
+
+  router.get("/members/me", async (req, res) => {
+    const memberSession = await memberAuthService.validateRequest(req);
+    if (!memberSession?.memberId) {
+      return res.status(401).json({ error: "Invalid or missing member token" });
+    }
+
+    const member = memberRepository.findById(memberSession.memberId);
+    if (!member) {
+      return res.status(404).json({ error: "Member not found" });
+    }
+
+    return res.json({
+      member: memberAuthService.sanitizeMember(member),
+    });
+  });
+
+  router.get("/admin/analytics", async (req, res) => {
+    const shopSession = await authService.validateRequest(req);
+    if (!shopSession?.shopDomain) {
+      return res.status(401).json({ error: "Invalid or missing Shopify session token" });
+    }
+
+    const allMembers = memberRepository.list();
+    const allDesigns = designRepository.listByShop(shopSession.shopDomain);
+    const published = allDesigns.filter((item) => item.status === "published").length;
+
+    return res.json({
+      visitors: analyticsService.getSummary(),
+      totals: {
+        members: allMembers.length,
+        designs: allDesigns.length,
+        publishedDesigns: published,
+      },
+      recentMembers: allMembers.slice(0, 8).map((item) => memberAuthService.sanitizeMember(item)),
+    });
+  });
+
+  router.get("/settings", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const settings = settingsRepository.findByShop(session.shopDomain);
+    return res.json({
+      imageProviderDefault: "openai",
+      keiAiApiKey: settings?.keiAiApiKey || "",
+      openAiApiKey: settings?.openAiApiKey || "",
+      kieGenerateUrl: settings?.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+      kieEditUrl: settings?.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+      updatedAt: settings?.updatedAt || null,
+    });
+  });
+
+  router.put("/settings", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const existing = settingsRepository.findByShop(session.shopDomain);
+    const hasKeiApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "keiAiApiKey");
+    const hasOpenAiApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "openAiApiKey");
+    const hasKieGenerateUrl = Object.prototype.hasOwnProperty.call(req.body || {}, "kieGenerateUrl");
+    const hasKieEditUrl = Object.prototype.hasOwnProperty.call(req.body || {}, "kieEditUrl");
+
+    const keiAiApiKey = hasKeiApiKey
+      ? String(req.body?.keiAiApiKey || "").trim()
+      : String(existing?.keiAiApiKey || "").trim();
+    const openAiApiKey = hasOpenAiApiKey
+      ? String(req.body?.openAiApiKey || "").trim()
+      : String(existing?.openAiApiKey || "").trim();
+    const kieGenerateUrl = (hasKieGenerateUrl
+      ? String(req.body?.kieGenerateUrl || "").trim()
+      : String(existing?.kieGenerateUrl || "").trim()) || "https://api.kie.ai/api/v1/gpt4o-image/generate";
+    const kieEditUrl = (hasKieEditUrl
+      ? String(req.body?.kieEditUrl || "").trim()
+      : String(existing?.kieEditUrl || "").trim()) || "https://api.kie.ai/api/v1/gpt4o-image/generate";
+
+    const settings = settingsRepository.upsertByShop(session.shopDomain, {
+      keiAiApiKey,
+      openAiApiKey,
+      kieGenerateUrl,
+      kieEditUrl,
+    });
+
+    return res.json({
+      imageProviderDefault: "openai",
+      keiAiApiKey: settings.keiAiApiKey,
+      openAiApiKey: settings.openAiApiKey,
+      kieGenerateUrl: settings.kieGenerateUrl,
+      kieEditUrl: settings.kieEditUrl,
+      updatedAt: settings.updatedAt,
+    });
+  });
+
+  router.post("/settings/test-kie", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      const keiAiApiKey = String(req.body?.keiAiApiKey || settings?.keiAiApiKey || "").trim();
+      const kieGenerateUrl = String(req.body?.kieGenerateUrl || settings?.kieGenerateUrl || "").trim();
+      const result = await pipelineService.generateDesignImage({
+        artworkPrompt: "test image prompt for connectivity",
+        keiAiApiKey,
+        kieGenerateUrl,
+        maxWaitMs: 15000,
+        pollIntervalMs: 2000,
+      });
+
+      return res.json({
+        provider: result.provider,
+        message: result.providerMessage,
+        imageUrl: result.imageUrl,
+        endpoint: kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to test KIE connection",
+      });
+    }
+  });
+
+  router.post("/settings/test-openai", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      const openAiApiKey = String(req.body?.openAiApiKey || settings?.openAiApiKey || "").trim();
+
+      const copyResult = await pipelineService.generateListingCopy({
+        prompt: "test listing copy for shamrock mug",
+        productType: "mug",
+        openAiApiKey,
+      });
+
+      // Also probe whether image generation is available on this key
+      let imageProvider = "not-tested";
+      let imageMessage = "";
+      if (pipelineService.isUsableApiKey(openAiApiKey)) {
+        const probeResponse = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiApiKey}` },
+          body: JSON.stringify({ model: "gpt-image-1", prompt: "a simple test circle", size: "1024x1024", n: 1 }),
+        }).catch(() => null);
+
+        if (!probeResponse) {
+          imageProvider = "error";
+          imageMessage = "Network error reaching OpenAI image API";
+        } else if (probeResponse.ok) {
+          imageProvider = "gpt-image-1";
+          imageMessage = "gpt-image-1 is available on this key";
+        } else {
+          // Try dall-e-3 as fallback check
+          const fallbackResponse = await fetch("https://api.openai.com/v1/models/dall-e-3", {
+            headers: { Authorization: `Bearer ${openAiApiKey}` },
+          }).catch(() => null);
+          if (fallbackResponse?.ok) {
+            imageProvider = "dall-e-3";
+            imageMessage = `gpt-image-1 not on this tier (${probeResponse.status}) — dall-e-3 will be used`;
+          } else {
+            const errBody = await probeResponse.json().catch(() => ({}));
+            imageProvider = "error";
+            imageMessage = errBody?.error?.message || `Image generation unavailable (${probeResponse.status})`;
+          }
+        }
+      }
+
+      return res.json({
+        provider: copyResult.provider,
+        message: copyResult.providerMessage,
+        sampleTitle: copyResult.copy?.title || "",
+        imageProvider,
+        imageMessage,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to test OpenAI connection",
+      });
+    }
+  });
+
+  router.post("/analyze-image", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const imageBase64 = String(req.body?.imageBase64 || "").trim();
+    if (!imageBase64) {
+      return res.status(400).json({ error: "imageBase64 is required" });
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      const result = await pipelineService.analyzeProductImage({
+        imageBase64,
+        openAiApiKey: settings?.openAiApiKey || "",
+      });
+      return res.json({ description: result.description });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to analyze image",
+      });
+    }
+  });
+
+  router.post("/design-preview", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const prompt = String(req.body?.prompt || "").trim();
+    const productType = String(req.body?.productType || "mug").trim().toLowerCase();
+    const publishImmediately = Boolean(req.body?.publishImmediately);
+
+    if (!prompt) {
+      return res.status(400).json({ error: "Prompt is required" });
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      const artworkPrompt = await pipelineService.buildArtworkPrompt({ prompt, productType });
+      let designResult = await pipelineService.generateDesignImage({
+        artworkPrompt,
+        openAiApiKey: settings?.openAiApiKey || "",
+        keiAiApiKey: settings?.keiAiApiKey || "",
+        kieGenerateUrl: settings?.kieGenerateUrl,
+        maxWaitMs: 30000,
+        pollIntervalMs: 2500,
+      });
+      const designImageUrl = designResult.imageUrl;
+
+      const design = pipelineService.createDesignRecord({
+        shopDomain: session.shopDomain,
+        prompt,
+        productType,
+        publishImmediately,
+        artworkPrompt,
+        designImageUrl,
+      });
+
+      const previewAsset = assetStorageService.saveAsset({
+        designId: design.id,
+        shopDomain: session.shopDomain,
+        type: "design-preview",
+        role: "base",
+        url: designImageUrl,
+        promptSnapshot: artworkPrompt,
+      });
+
+      const savedDesign = designRepository.create({
+        ...design,
+        currentDesignAssetId: previewAsset.id,
+      });
+
+      return res.json({
+        designId: savedDesign.id,
+        designImageUrl,
+        provider: {
+          designImage: designResult.provider,
+          message: designResult.providerMessage,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to generate design preview",
+      });
+    }
+  });
+
+  router.post("/revise-design", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const designId = String(req.body?.designId || "").trim();
+    const amendment = String(req.body?.amendment || "").trim();
+
+    if (!designId || !amendment) {
+      return res.status(400).json({ error: "designId and amendment are required" });
+    }
+
+    const design = designRepository.findById(designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      const artworkPrompt = await pipelineService.buildArtworkPrompt({
+        prompt: design.prompt,
+        productType: design.productType,
+        amendment,
+      });
+      const revisionPrompt = `Edit the provided product design image. Keep the same overall composition, subject, and visual style. Apply only this change: ${amendment}`;
+      let designResult = await pipelineService.generateDesignImage({
+        artworkPrompt: revisionPrompt,
+        openAiApiKey: settings?.openAiApiKey || "",
+        keiAiApiKey: settings?.keiAiApiKey || "",
+        kieGenerateUrl: settings?.kieEditUrl || settings?.kieGenerateUrl,
+        referenceImageUrl: design.previewImageUrl,
+        maxWaitMs: 20000,
+        pollIntervalMs: 2500,
+      });
+
+      if (designResult.provider !== "openai" && designResult.provider !== "kie") {
+        const providerMessage = String(designResult.providerMessage || "").toLowerCase();
+        const shouldRetryWithoutReference =
+          providerMessage.includes("size exceeds limit") ||
+          providerMessage.includes("timed out");
+
+        designResult = await pipelineService.generateDesignImage({
+          artworkPrompt: revisionPrompt,
+          openAiApiKey: settings?.openAiApiKey || "",
+          keiAiApiKey: settings?.keiAiApiKey || "",
+          kieGenerateUrl: settings?.kieEditUrl || settings?.kieGenerateUrl,
+          referenceImageUrl: shouldRetryWithoutReference ? undefined : design.previewImageUrl,
+          maxWaitMs: 70000,
+          pollIntervalMs: 3000,
+        });
+      }
+
+      if (designResult.provider !== "openai" && designResult.provider !== "kie") {
+        return res.status(504).json({
+          error: "Revision image generation did not complete in time. Please retry.",
+          provider: {
+            designImage: designResult.provider,
+            message: designResult.providerMessage,
+          },
+        });
+      }
+
+      const designImageUrl = designResult.imageUrl;
+
+      const revisedAsset = assetStorageService.saveAsset({
+        designId,
+        shopDomain: session.shopDomain,
+        type: "design-preview",
+        role: "revision",
+        url: designImageUrl,
+        promptSnapshot: artworkPrompt,
+      });
+
+      designRepository.update(designId, {
+        artworkPrompt,
+        previewImageUrl: designImageUrl,
+        currentDesignAssetId: revisedAsset.id,
+        revisionCount: Number(design.revisionCount || 0) + 1,
+        status: "preview_ready",
+        updatedAt: Date.now(),
+      });
+
+      return res.json({
+        designId,
+        designImageUrl,
+        provider: {
+          designImage: designResult.provider,
+          message: designResult.providerMessage,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to revise design",
+      });
+    }
+  });
+
+  router.post("/finalize-product", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const designId = String(req.body?.designId || "").trim();
+    if (!designId) {
+      return res.status(400).json({ error: "designId is required" });
+    }
+
+    const design = designRepository.findById(designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    const publishImmediately =
+      typeof req.body?.publishImmediately === "boolean"
+        ? req.body.publishImmediately
+        : Boolean(design.publishImmediately);
+    const requestedLifestylePrompts = Array.isArray(req.body?.lifestylePrompts)
+      ? req.body.lifestylePrompts
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+      : [];
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      let lifestyleResult = await pipelineService.generateLifestyleImages({
+        productType: design.productType,
+        baseDesignImageUrl: design.previewImageUrl,
+        designConcept: design.prompt,
+        keiAiApiKey: settings?.keiAiApiKey || "",
+        kieEditUrl: settings?.kieEditUrl,
+        openAiApiKey: settings?.openAiApiKey || "",
+        lifestylePrompts: requestedLifestylePrompts,
+        maxWaitMs: 30000,
+        pollIntervalMs: 2500,
+      });
+      if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai") {
+        const scenePrompts = requestedLifestylePrompts.length
+          ? requestedLifestylePrompts
+          : [
+              `Place this exact ${design.productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
+              `Show this exact ${design.productType} product in a clean, minimal flat-lay arrangement on a light surface. Keep the product design exactly as shown in the reference image.`,
+              `Show a person holding this exact ${design.productType} product in a lifestyle setting. Keep the product design exactly as shown in the reference image.`,
+            ];
+
+        const openAiLifestyleImages = [];
+        for (const scenePrompt of scenePrompts) {
+          let imageUrl = await pipelineService.generateOpenAiImageEdit({
+            prompt: scenePrompt,
+            referenceImageUrl: design.previewImageUrl,
+            openAiApiKey: settings?.openAiApiKey || "",
+          });
+          if (!imageUrl) {
+            imageUrl = await pipelineService.generateOpenAiImage({
+              prompt: scenePrompt,
+              openAiApiKey: settings?.openAiApiKey || "",
+            });
+          }
+          if (imageUrl) {
+            openAiLifestyleImages.push(imageUrl);
+          }
+        }
+
+        if (openAiLifestyleImages.length === scenePrompts.length) {
+          lifestyleResult = {
+            imageUrls: openAiLifestyleImages,
+            provider: "openai-image-fallback",
+            providerMessage: `KIE unavailable. Used OpenAI image generation for lifestyle scenes. Previous message: ${lifestyleResult.providerMessage}`,
+          };
+        }
+      }
+      const lifestyleImages = lifestyleResult.imageUrls;
+
+      // Extract isolated artwork with transparent background
+      let transparentArtworkUrl = null;
+      try {
+        transparentArtworkUrl = await pipelineService.extractArtwork({
+          designImageUrl: design.previewImageUrl,
+          openAiApiKey: settings?.openAiApiKey || "",
+        });
+        if (transparentArtworkUrl) {
+          assetStorageService.saveAsset({
+            designId,
+            shopDomain: session.shopDomain,
+            type: "artwork-transparent",
+            role: "final",
+            url: transparentArtworkUrl,
+            promptSnapshot: "Isolated artwork with transparent background",
+          });
+        }
+      } catch (artworkErr) {
+        console.error("[Finalize] extractArtwork error:", artworkErr?.message);
+      }
+
+      const listingCopyResult = await pipelineService.generateListingCopy({
+        prompt: design.prompt,
+        productType: design.productType,
+        openAiApiKey: settings?.openAiApiKey || "",
+      });
+      const listingCopy = listingCopyResult.copy;
+
+      for (const imageUrl of lifestyleImages) {
+        assetStorageService.saveAsset({
+          designId,
+          shopDomain: session.shopDomain,
+          type: "lifestyle",
+          role: "final",
+          url: imageUrl,
+          promptSnapshot: design.artworkPrompt,
+        });
+      }
+
+      const publishedProduct = await publishService.publish({
+        shopDomain: session.shopDomain,
+        title: listingCopy.title,
+        descriptionHtml: listingCopy.descriptionHtml,
+        tags: listingCopy.tags,
+        imageUrls: [design.previewImageUrl, ...lifestyleImages],
+        publishImmediately,
+      });
+
+      designRepository.update(designId, {
+        status: "published",
+        shopifyProductId: publishedProduct.productId,
+        adminUrl: publishedProduct.adminUrl,
+        updatedAt: Date.now(),
+        finalizedAt: Date.now(),
+      });
+
+      productRepository.upsertByDesign(designId, {
+        designId,
+        shopDomain: session.shopDomain,
+        productId: publishedProduct.productId,
+        adminUrl: publishedProduct.adminUrl,
+        publishImmediately,
+        updatedAt: Date.now(),
+      });
+
+      return res.json({
+        productId: publishedProduct.productId,
+        adminUrl: publishedProduct.adminUrl,
+        lifestyleImages,
+        transparentArtworkUrl,
+        provider: {
+          lifestyleImages: lifestyleResult.provider,
+          listingCopy: listingCopyResult.provider,
+          message: [lifestyleResult.providerMessage, listingCopyResult.providerMessage].filter(Boolean).join(" | "),
+        },
+        listingCopy: {
+          title: listingCopy.title,
+          descriptionText: listingCopy.descriptionText,
+          tags: listingCopy.tags,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to finalize product",
+      });
+    }
+  });
+
+  router.get("/designs", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const designs = designRepository.listByShop(session.shopDomain).map((design) => ({
+      id: design.id,
+      prompt: design.prompt,
+      productType: design.productType,
+      status: design.status,
+      previewImageUrl: design.previewImageUrl,
+      adminUrl: design.adminUrl,
+      shopifyProductId: design.shopifyProductId,
+      createdAt: design.createdAt,
+      updatedAt: design.updatedAt,
+    }));
+
+    return res.json({ designs });
+  });
+
+  router.delete("/designs/:designId", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) return;
+
+    const design = designRepository.findById(req.params.designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    // Remove associated assets
+    assetStorageService.assetRepository.deleteByDesign(design.id);
+    designRepository.delete(design.id);
+
+    return res.json({ success: true });
+  });
+
+  router.get("/designs/:designId/assets", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const design = designRepository.findById(req.params.designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    return res.json({
+      designId: design.id,
+      assets: assetStorageService.listDesignAssets(design.id),
+    });
+  });
+
+  return router;
+}
+
+module.exports = {
+  createPodRouter,
+};

@@ -1,0 +1,13 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+coverage/
+backend/data/store.json
+*.bak
+*.bak2
+.venv/
+__pycache__/
+.DS_Store
+Thumbs.db
