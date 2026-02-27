@@ -9,9 +9,11 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
-const port = Number(process.env.PORT || 3000);
-const app = createServer();
+(async () => {
+  const port = Number(process.env.PORT || 3000);
+  const app = await createServer();
 
-app.listen(port, () => {
-  console.log(`Backend listening on port ${port}`);
-});
+  app.listen(port, () => {
+    console.log(`Backend listening on port ${port}`);
+  });
+})();

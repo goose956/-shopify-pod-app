@@ -15,8 +15,11 @@ function getConfig() {
       devShopDomain: process.env.DEV_SHOP_DOMAIN || "example.myshopify.com",
     },
     storage: {
+      databaseUrl: process.env.DATABASE_URL || "",
       dataFilePath:
         process.env.APP_DATA_FILE || path.join(__dirname, "..", "data", "store.json"),
+      uploadsDir:
+        process.env.UPLOADS_DIR || path.join(__dirname, "..", "data", "uploads"),
     },
   };
 }

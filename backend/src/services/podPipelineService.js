@@ -2,16 +2,14 @@ const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const UPLOADS_DIR = path.join(__dirname, "..", "..", "data", "uploads");
-
-function saveBase64ToDisk(base64Data, mimeType = "image/png") {
+function saveBase64ToDisk(uploadsDir, base64Data, mimeType = "image/png") {
   try {
-    if (!fs.existsSync(UPLOADS_DIR)) {
-      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
     }
     const ext = mimeType.includes("webp") ? "webp" : mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpg" : "png";
     const filename = `${randomUUID()}.${ext}`;
-    const filePath = path.join(UPLOADS_DIR, filename);
+    const filePath = path.join(uploadsDir, filename);
     fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
     console.log(`[Image] Saved ${(Buffer.byteLength(base64Data, "base64") / 1024).toFixed(0)}KB image to ${filename}`);
     return `/uploads/${filename}`;
@@ -22,8 +20,8 @@ function saveBase64ToDisk(base64Data, mimeType = "image/png") {
 }
 
 class PodPipelineService {
-  constructor(analyticsService) {
-    this.analyticsService = analyticsService || null;
+  constructor(uploadsDir) {
+    this.uploadsDir = uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
   }
 
   _trackCost({ provider, model, operation }) {
@@ -464,7 +462,7 @@ class PodPipelineService {
       // gpt-image-1 returns b64_json — save to disk and return a local URL
       const b64 = payload?.data?.[0]?.b64_json;
       if (b64) {
-        const localUrl = saveBase64ToDisk(b64, "image/png");
+        const localUrl = saveBase64ToDisk(this.uploadsDir, b64, "image/png");
         if (localUrl) return localUrl;
         // Fallback to data URI if disk save fails
         return `data:image/png;base64,${b64}`;
@@ -568,7 +566,7 @@ class PodPipelineService {
 
       const b64Edit = payload?.data?.[0]?.b64_json;
       if (b64Edit) {
-        const localUrl = saveBase64ToDisk(b64Edit, "image/png");
+        const localUrl = saveBase64ToDisk(this.uploadsDir, b64Edit, "image/png");
         if (localUrl) return localUrl;
         return `data:image/png;base64,${b64Edit}`;
       }
@@ -834,7 +832,7 @@ class PodPipelineService {
 
       const b64Extract = payload?.data?.[0]?.b64_json;
       if (b64Extract) {
-        const localUrl = saveBase64ToDisk(b64Extract, "image/png");
+        const localUrl = saveBase64ToDisk(this.uploadsDir, b64Extract, "image/png");
         if (localUrl) return localUrl;
         return `data:image/png;base64,${b64Extract}`;
       }

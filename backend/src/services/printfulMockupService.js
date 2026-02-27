@@ -11,7 +11,6 @@ const path = require("path");
 const fs = require("fs");
 
 const PRINTFUL_BASE = "https://api.printful.com";
-const UPLOADS_DIR = path.join(__dirname, "..", "..", "data", "uploads");
 
 // Map our product types to Printful product IDs
 const PRODUCT_MAP = {
@@ -26,6 +25,10 @@ const PRODUCT_MAP = {
 };
 
 class PrintfulMockupService {
+  constructor(uploadsDir) {
+    this.uploadsDir = uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
+  }
+
   /**
    * Generate a product mockup via Printful's Mockup Generator API.
    *
@@ -67,7 +70,7 @@ class PrintfulMockupService {
     let imageUrl = artworkUrl;
     if (String(artworkUrl).startsWith("/uploads/")) {
       // Convert local file to data URI then upload
-      const localPath = path.join(UPLOADS_DIR, path.basename(artworkUrl));
+      const localPath = path.join(this.uploadsDir, path.basename(artworkUrl));
       if (fs.existsSync(localPath)) {
         const buffer = fs.readFileSync(localPath);
         const ext = path.extname(localPath).toLowerCase();
