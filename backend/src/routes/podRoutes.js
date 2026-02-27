@@ -1,4 +1,7 @@
 ﻿const express = require("express");
+const { randomUUID } = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 /**
  * Sanitize user input: strip HTML tags and limit length.
@@ -14,6 +17,28 @@ function sanitize(input, maxLength = 2000) {
 
 function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService, config }) {
   const router = express.Router();
+  const uploadsDir = config?.storage?.uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
+
+  /** Download an external http(s) URL to local uploads dir and return a /uploads/ path. */
+  async function persistImageUrl(imageUrl) {
+    if (!imageUrl || typeof imageUrl !== "string") return imageUrl;
+    if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return imageUrl;
+    try {
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+      const resp = await fetch(imageUrl);
+      if (!resp.ok) return imageUrl;
+      const ct = resp.headers.get("content-type") || "image/png";
+      const ext = ct.includes("webp") ? "webp" : ct.includes("jpeg") || ct.includes("jpg") ? "jpg" : "png";
+      const filename = `${randomUUID()}.${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
+      console.log(`[Finalize] Persisted external image to ${filename}`);
+      return `/uploads/${filename}`;
+    } catch (err) {
+      console.error("[Finalize] Failed to persist image URL:", err?.message);
+      return imageUrl;
+    }
+  }
 
   // Env-var defaults for API keys (fallback when not saved in DB settings)
   const envDefaults = config?.defaults || {};
@@ -731,6 +756,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         }
       }
       const lifestyleImages = lifestyleResult.imageUrls;
+
+      // Persist any external URLs to local disk so they don't expire
+      for (let i = 0; i < lifestyleImages.length; i++) {
+        lifestyleImages[i] = await persistImageUrl(lifestyleImages[i]);
+      }
 
       // Use already-generated raw artwork instead of extracting from mockup
       let transparentArtworkUrl = design.rawArtworkUrl || null;

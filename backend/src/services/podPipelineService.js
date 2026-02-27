@@ -19,6 +19,33 @@ function saveBase64ToDisk(uploadsDir, base64Data, mimeType = "image/png") {
   }
 }
 
+async function downloadUrlToDisk(uploadsDir, imageUrl) {
+  try {
+    if (!imageUrl || typeof imageUrl !== "string") return null;
+    // Only download external http(s) URLs — skip local paths, data URIs, etc.
+    if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return null;
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      console.error(`[Image] Failed to download URL (${response.status}): ${imageUrl.slice(0, 80)}...`);
+      return null;
+    }
+    const contentType = response.headers.get("content-type") || "image/png";
+    const ext = contentType.includes("webp") ? "webp" : contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg" : "png";
+    const filename = `${randomUUID()}.${ext}`;
+    const filePath = path.join(uploadsDir, filename);
+    const buffer = Buffer.from(await response.arrayBuffer());
+    fs.writeFileSync(filePath, buffer);
+    console.log(`[Image] Downloaded ${(buffer.length / 1024).toFixed(0)}KB image to ${filename}`);
+    return `/uploads/${filename}`;
+  } catch (err) {
+    console.error("[Image] Failed to download URL to disk:", err?.message);
+    return null;
+  }
+}
+
 class PodPipelineService {
   constructor(uploadsDir) {
     this.uploadsDir = uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
@@ -456,7 +483,9 @@ class PodPipelineService {
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
       if (url) {
-        return url;
+        // Persist to disk so the temporary URL doesn't expire
+        const localUrl = await downloadUrlToDisk(this.uploadsDir, url);
+        return localUrl || url;
       }
 
       // gpt-image-1 returns b64_json — save to disk and return a local URL
@@ -561,7 +590,9 @@ class PodPipelineService {
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
       if (url) {
-        return url;
+        // Persist to disk so the temporary URL doesn't expire
+        const localUrl = await downloadUrlToDisk(this.uploadsDir, url);
+        return localUrl || url;
       }
 
       const b64Edit = payload?.data?.[0]?.b64_json;

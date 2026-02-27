@@ -30,11 +30,11 @@ import { AdminDashboard } from "./AdminDashboard";
 
 function buildDefaultLifestylePrompt(productType, index) {
   const defaults = [
-    `${productType} lifestyle scene on a kitchen table with natural daylight`,
-    `${productType} lifestyle scene placed on a clean floor setup`,
-    `${productType} lifestyle scene with someone holding the product`,
+    `${productType} product image scene on a kitchen table with natural daylight`,
+    `${productType} product image scene placed on a clean floor setup`,
+    `${productType} product image scene with someone holding the product`,
   ];
-  return defaults[index] || `${productType} lifestyle scene variation ${index + 1}`;
+  return defaults[index] || `${productType} product image scene variation ${index + 1}`;
 }
 
 function openImageFullSize(url) {
@@ -1067,10 +1067,10 @@ export function ProductGenerator() {
           {designImageUrl && (
           <Card>
             <BlockStack gap="400">
-              <Text variant="headingMd" as="h2" fontWeight="semibold">Lifestyle Image Settings</Text>
+              <Text variant="headingMd" as="h2" fontWeight="semibold">Product Image Settings</Text>
               <InlineGrid columns={{ xs: 1, sm: 2 }} gap="400">
                 <Select
-                  label="Number of lifestyle images"
+                  label="Number of product images"
                   options={lifestyleCountOptions}
                   onChange={handleLifestyleImageCountChange}
                   value={lifestyleImageCount}
@@ -1111,13 +1111,13 @@ export function ProductGenerator() {
         </BlockStack>
       )}
 
-      {/* Tab 3: Lifestyle Images + Copy */}
+      {/* Tab 3: Product Images + Copy */}
       {selectedTab === 2 && hasLifestyle && (
         <BlockStack gap="400">
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center" align="space-between">
-                <Text variant="headingMd" as="h2" fontWeight="semibold">Lifestyle Images</Text>
+                <Text variant="headingMd" as="h2" fontWeight="semibold">Product Images</Text>
                 <Text variant="bodySm" tone="subdued" as="p">{lifestyleImages.length} image{lifestyleImages.length !== 1 ? "s" : ""}</Text>
               </InlineStack>
 
@@ -1132,7 +1132,7 @@ export function ProductGenerator() {
                   <ImagePreviewCard
                     key={imageUrl + index}
                     imageUrl={imageUrl}
-                    label={`Lifestyle ${index + 1}`}
+                    label={`Product Image ${index + 1}`}
                     size="medium"
                     onOpen={() => openImageFullSize(imageUrl)}
                   />
