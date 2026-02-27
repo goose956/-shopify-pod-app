@@ -106,9 +106,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     try {
       // Query Shopify's access_scopes endpoint
-      const apiVersion = config.shopify.apiVersion || "2025-10";
       const resp = await fetch(
-        `https://${session.shopDomain}/admin/api/${apiVersion}/access_scopes.json`,
+        `https://${session.shopDomain}/admin/oauth/access_scopes.json`,
         { headers: { "X-Shopify-Access-Token": token } }
       );
       const data = await resp.json();
