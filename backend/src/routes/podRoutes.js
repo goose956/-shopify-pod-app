@@ -946,6 +946,97 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
   });
 
+  // ── Retry publishing a finalized design to Shopify ──────────────────────
+  router.post("/retry-publish", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) return;
+
+    const designId = String(req.body?.designId || "").trim();
+    if (!designId) return res.status(400).json({ error: "designId is required" });
+
+    const design = designRepository.findById(designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    // Already published?
+    if (design.status === "published" && design.shopifyProductId) {
+      return res.json({
+        productId: design.shopifyProductId,
+        adminUrl: design.adminUrl,
+        alreadyPublished: true,
+      });
+    }
+
+    const publishImmediately = typeof req.body?.publishImmediately === "boolean"
+      ? req.body.publishImmediately
+      : Boolean(design.publishImmediately);
+
+    // Gather images — from assets if available, otherwise use previewImageUrl
+    const assets = assetStorageService.listDesignAssets(designId);
+    const lifestyleUrls = assets
+      .filter((a) => a.type === "lifestyle")
+      .map((a) => a.url);
+    const imageUrls = [design.previewImageUrl, ...lifestyleUrls].filter(Boolean);
+
+    // Build listing copy from design data
+    const settings = getEffectiveSettings(session.shopDomain);
+    let listingCopy;
+    try {
+      const result = await pipelineService.generateListingCopy({
+        prompt: design.prompt,
+        productType: design.productType,
+        openAiApiKey: settings?.openAiApiKey || "",
+      });
+      listingCopy = result.copy;
+    } catch {
+      listingCopy = {
+        title: `${design.productType.toUpperCase()} - ${design.prompt.slice(0, 45)}`,
+        descriptionHtml: `<p>${design.prompt}</p>`,
+        tags: ["ai-generated", "pod", design.productType],
+      };
+    }
+
+    try {
+      const publishedProduct = await publishService.publish({
+        shopDomain: session.shopDomain,
+        title: listingCopy.title,
+        descriptionHtml: listingCopy.descriptionHtml,
+        tags: listingCopy.tags,
+        imageUrls,
+        publishImmediately,
+      });
+
+      designRepository.update(designId, {
+        status: "published",
+        shopifyProductId: publishedProduct.productId,
+        adminUrl: publishedProduct.adminUrl,
+        updatedAt: Date.now(),
+      });
+
+      productRepository.upsertByDesign(designId, {
+        designId,
+        shopDomain: session.shopDomain,
+        productId: publishedProduct.productId,
+        adminUrl: publishedProduct.adminUrl,
+        publishImmediately,
+        updatedAt: Date.now(),
+      });
+
+      return res.json({
+        productId: publishedProduct.productId,
+        adminUrl: publishedProduct.adminUrl,
+      });
+    } catch (pubErr) {
+      console.error("[RetryPublish] Failed:", pubErr?.message);
+      return res.json({
+        productId: null,
+        adminUrl: null,
+        publishError: pubErr?.message || "Publish failed",
+      });
+    }
+  });
+
   router.get("/designs", async (req, res) => {
     const session = await requireSession(req, res);
     if (!session) {

@@ -1251,7 +1251,10 @@ export function ProductGenerator() {
                   </InlineStack>
                   <Banner tone="warning">
                     <p>
-                      Lifestyle images and listing copy were generated successfully, but publishing to Shopify failed: {finalProduct.publishError || "No valid Shopify access token. Complete the OAuth install flow to enable publishing."}
+                      Product images and listing copy were generated successfully, but publishing to Shopify failed: {finalProduct.publishError || "No valid Shopify access token."}
+                    </p>
+                    <p>
+                      To fix this, complete the OAuth install by visiting your app's install URL, then retry publishing below.
                     </p>
                   </Banner>
                 </>
@@ -1259,9 +1262,55 @@ export function ProductGenerator() {
             </BlockStack>
           </Card>
 
+          {/* Retry Publish button when publish failed */}
+          {finalProduct && !finalProduct.productId && designId && (
+            <Card>
+              <BlockStack gap="300">
+                <Text variant="headingSm" as="h3">Retry Publishing</Text>
+                <Text variant="bodySm" tone="subdued" as="p">
+                  If you have completed the Shopify OAuth install, you can retry publishing this product.
+                </Text>
+                <InlineStack gap="300">
+                  <Button
+                    variant="primary"
+                    onClick={async () => {
+                      setError(null);
+                      setIsFinalizing(true);
+                      try {
+                        const sessionToken = await getSessionToken();
+                        const response = await fetch("/api/retry-publish", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
+                          body: JSON.stringify({ designId, publishImmediately }),
+                        });
+                        const data = await response.json();
+                        if (!response.ok) {
+                          throw new Error(data.error || `Publish failed (${response.status})`);
+                        }
+                        if (data.productId) {
+                          setFinalProduct({ adminUrl: data.adminUrl, productId: data.productId, publishError: null });
+                        } else {
+                          setError(data.publishError || "Publish still failed. Ensure you have completed the OAuth install.");
+                        }
+                      } catch (err) {
+                        setError(err.message || "Retry failed");
+                      } finally {
+                        setIsFinalizing(false);
+                      }
+                    }}
+                    loading={isFinalizing}
+                    disabled={isFinalizing}
+                  >
+                    Retry Publish to Shopify
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Card>
+          )}
+
           <InlineStack gap="300">
             <Button onClick={() => setSelectedTab(2)}>
-              View Lifestyle Images
+              View Product Images
             </Button>
             <Button onClick={() => setSelectedTab(4)}>
               View Library
