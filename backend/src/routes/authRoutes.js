@@ -114,8 +114,9 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       }
 
       const tokenData = await tokenResponse.json();
+      console.log(`[OAuth] Full token response: ${JSON.stringify(tokenData).slice(0, 500)}`);
       const accessToken = tokenData.access_token;
-      const grantedScopes = tokenData.scope;
+      const grantedScopes = tokenData.scope || "";
 
       if (!accessToken) {
         console.error("[OAuth] Token exchange returned no access_token:", JSON.stringify(tokenData).slice(0, 300));
