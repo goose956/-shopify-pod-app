@@ -14,12 +14,15 @@ class ShopifyPublishService {
     // 1. Per-shop OAuth token (stored during /auth/callback)
     if (this.settingsRepository) {
       const shopSettings = this.settingsRepository.findByShop(shopDomain);
+      console.log(`[ShopifyPublish] Token lookup for "${shopDomain}": found=${Boolean(shopSettings?.shopifyAccessToken)}, tokenPrefix=${shopSettings?.shopifyAccessToken ? shopSettings.shopifyAccessToken.slice(0, 8) + '...' : 'none'}`);
       if (shopSettings?.shopifyAccessToken) {
         return shopSettings.shopifyAccessToken;
       }
     }
     // 2. Global fallback (single-tenant / dev mode)
-    return this.config.shopify.adminAccessToken || "";
+    const envToken = this.config.shopify.adminAccessToken || "";
+    console.log(`[ShopifyPublish] No per-shop token, env fallback: ${envToken ? 'present' : 'empty'}`);
+    return envToken;
   }
 
   /**

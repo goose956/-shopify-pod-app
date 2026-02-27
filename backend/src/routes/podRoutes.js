@@ -91,6 +91,33 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     return session;
   }
 
+  // ── Debug: check OAuth token status for current session ─────────────────
+  router.get("/debug-auth", async (req, res) => {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      return res.status(401).json({ error: "No session" });
+    }
+
+    const shopSettings = settingsRepository.findByShop(session.shopDomain);
+    const allSettings = settingsRepository.store?.read?.()?.settings || [];
+    const shopDomains = allSettings
+      .filter(s => !s.shopDomain?.startsWith("_nonce:"))
+      .map(s => ({
+        domain: s.shopDomain,
+        hasToken: Boolean(s.shopifyAccessToken),
+        tokenPrefix: s.shopifyAccessToken ? s.shopifyAccessToken.slice(0, 8) + "..." : "none",
+        installedAt: s.installedAt,
+      }));
+
+    res.json({
+      sessionShopDomain: session.shopDomain,
+      authType: session.authType,
+      tokenFound: Boolean(shopSettings?.shopifyAccessToken),
+      tokenPrefix: shopSettings?.shopifyAccessToken ? shopSettings.shopifyAccessToken.slice(0, 8) + "..." : "none",
+      allShops: shopDomains,
+    });
+  });
+
   router.post("/members/register", async (req, res) => {
     try {
       const member = await memberAuthService.register({
