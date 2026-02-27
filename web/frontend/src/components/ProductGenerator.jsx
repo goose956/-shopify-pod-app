@@ -972,23 +972,25 @@ export function ProductGenerator() {
                 </Text>
               </InlineStack>
 
-              <InlineStack gap="500" blockAlign="start" wrap>
-                <ImagePreviewCard
-                  imageUrl={rawArtworkUrl || designImageUrl}
-                  label="Raw Artwork"
-                  size="large"
-                  onOpen={() => openImageFullSize(rawArtworkUrl || designImageUrl)}
-                />
-                {designImageUrl && (
+              <BlockStack gap="500">
+                <InlineStack gap="500" blockAlign="start" wrap>
                   <ImagePreviewCard
-                    imageUrl={designImageUrl}
-                    label="Product Mockup"
+                    imageUrl={rawArtworkUrl || designImageUrl}
+                    label="Raw Artwork"
                     size="large"
-                    onOpen={() => openImageFullSize(designImageUrl)}
+                    onOpen={() => openImageFullSize(rawArtworkUrl || designImageUrl)}
                   />
-                )}
+                  {designImageUrl && (
+                    <ImagePreviewCard
+                      imageUrl={designImageUrl}
+                      label="Product Mockup"
+                      size="large"
+                      onOpen={() => openImageFullSize(designImageUrl)}
+                    />
+                  )}
+                </InlineStack>
                 {!designImageUrl && (
-                  <BlockStack gap="300" style={{ flex: 1, minWidth: 220 }}>
+                  <BlockStack gap="300">
                     <Text variant="headingSm" as="h3">Request a change</Text>
                     <TextField
                       value={amendment}
@@ -1036,7 +1038,7 @@ export function ProductGenerator() {
                     </div>
                   </BlockStack>
                 )}
-              </InlineStack>
+              </BlockStack>
 
               {/* Approve artwork → generate mockup */}
               {!designImageUrl && (
