@@ -71,8 +71,9 @@ async function createServer() {
 
   // ── Health check (responds even while DB is still initialising) ────────
   let dbReady = false;
+  let storeType = "unknown";
   app.get("/health", (_req, res) => {
-    res.json({ ok: true, dbReady });
+    res.json({ ok: true, dbReady, storeType });
   });
 
   // ── Body parsing (skip /webhooks — they need raw body for HMAC) ────────────
@@ -107,12 +108,15 @@ async function createServer() {
   let store;
   try {
     if (config.storage.databaseUrl) {
-      console.log("[Storage] Using PostgreSQL");
+      console.log("[Storage] Using PostgreSQL, URL prefix:", config.storage.databaseUrl.slice(0, 25) + "...");
       store = new PostgresStore(config.storage.databaseUrl);
       await store.waitForReady();
+      storeType = "PostgresStore";
     } else {
-      console.log("[Storage] Using JSON file:", config.storage.dataFilePath);
+      console.log("[Storage] WARNING: DATABASE_URL not set — using ephemeral JSON file:", config.storage.dataFilePath);
+      console.log("[Storage] Data WILL BE LOST on every deploy! Set DATABASE_URL to fix.");
       store = new JsonStore(config.storage.dataFilePath);
+      storeType = "JsonStore";
     }
   } catch (err) {
     console.error("[FATAL] Database initialisation failed:", err);
