@@ -11,3 +11,6 @@ export default function App() {
     </PolarisProvider>
   );
 }
+
+// Note: Shopify App Bridge v4 auto-initialises via the CDN script in index.html.
+// Session tokens are obtained via window.shopify.idToken() — see utils/sessionToken.js.
