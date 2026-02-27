@@ -273,7 +273,7 @@ export function ProductGenerator() {
   const workflowSteps = [
     { id: "describe", label: "Describe", icon: "\u270F\uFE0F", done: hasDesign, disabled: false },
     { id: "preview", label: "Preview", icon: "\uD83D\uDDBC\uFE0F", done: hasLifestyle, disabled: !hasDesign },
-    { id: "lifestyle", label: "Lifestyle", icon: "\uD83D\uDCF8", done: hasFinalized, disabled: !hasLifestyle },
+    { id: "lifestyle", label: "Product Images", icon: "\uD83D\uDCF8", done: hasFinalized, disabled: !hasLifestyle },
     { id: "published", label: hasPublished ? "Published" : "Results", icon: hasPublished ? "\u2705" : "\uD83D\uDCCB", done: false, disabled: !hasFinalized },
   ];
 
