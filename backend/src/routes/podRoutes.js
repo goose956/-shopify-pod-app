@@ -106,14 +106,19 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         domain: s.shopDomain,
         hasToken: Boolean(s.shopifyAccessToken),
         tokenPrefix: s.shopifyAccessToken ? s.shopifyAccessToken.slice(0, 8) + "..." : "none",
+        grantedScopes: s.shopifyScopes || "unknown",
         installedAt: s.installedAt,
       }));
+
+    const configuredScopes = config?.shopify?.scopes?.join(",") || "unknown";
 
     res.json({
       sessionShopDomain: session.shopDomain,
       authType: session.authType,
       tokenFound: Boolean(shopSettings?.shopifyAccessToken),
       tokenPrefix: shopSettings?.shopifyAccessToken ? shopSettings.shopifyAccessToken.slice(0, 8) + "..." : "none",
+      grantedScopes: shopSettings?.shopifyScopes || "unknown",
+      configuredScopes,
       allShops: shopDomains,
     });
   });
@@ -153,6 +158,41 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       shop: targetShop,
       tokenSaved: Boolean(saved?.shopifyAccessToken),
       tokenPrefix: saved?.shopifyAccessToken ? saved.shopifyAccessToken.slice(0, 8) + "..." : "none",
+    });
+  });
+
+  // ── Reset OAuth (delete stored token so re-auth requests fresh scopes) ────
+  router.post("/reset-oauth", async (req, res) => {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      return res.status(401).json({ error: "No session" });
+    }
+
+    const targetShop = String(req.body?.shop || session.shopDomain).trim();
+    const before = settingsRepository.findByShop(targetShop);
+
+    // Clear token + scopes but keep other settings
+    settingsRepository.upsertByShop(targetShop, {
+      shopifyAccessToken: "",
+      shopifyScopes: "",
+    });
+
+    try {
+      await settingsRepository.flush();
+    } catch (e) {
+      console.error("[reset-oauth] flush error:", e.message);
+    }
+
+    const oauthUrl = `https://${config.shopify.hostName.replace(/^https?:\/\//, "")}/auth?shop=${encodeURIComponent(targetShop)}`;
+
+    res.json({
+      ok: true,
+      shop: targetShop,
+      previousTokenPrefix: before?.shopifyAccessToken ? before.shopifyAccessToken.slice(0, 8) + "..." : "none",
+      previousScopes: before?.shopifyScopes || "none",
+      tokenCleared: true,
+      oauthUrl,
+      message: `Token cleared. Visit the oauthUrl to re-authorize with scopes: ${config.shopify.scopes.join(",")}`,
     });
   });
 
