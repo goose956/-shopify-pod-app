@@ -133,10 +133,18 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       try {
         await settingsRepository.flush();
         console.log(`[OAuth] Token flushed to PostgreSQL for ${shop}`);
+
+        // Double-check: read directly from Postgres to confirm
+        if (settingsRepository.store?.pool) {
+          const pgResult = await settingsRepository.store.pool.query("SELECT data FROM app_data WHERE id = 1");
+          if (pgResult.rows.length > 0) {
+            const pgSettings = pgResult.rows[0].data?.settings || [];
+            const match = pgSettings.find(s => s.shopDomain === shop);
+            console.log(`[OAuth] Postgres verify: shop=${shop}, found=${Boolean(match)}, hasToken=${Boolean(match?.shopifyAccessToken)}, scopes=${match?.shopifyScopes || "none"}`);
+          }
+        }
       } catch (flushErr) {
         console.error(`[OAuth] FLUSH FAILED for ${shop}:`, flushErr.message);
-        // Even if flush fails, the in-memory cache has the token,
-        // so the app will work until the next restart. Log loudly.
       }
 
       console.log(`[OAuth] App installed for shop: ${shop}, token prefix: ${accessToken.slice(0, 8)}..., scopes: ${grantedScopes}`);

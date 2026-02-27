@@ -98,6 +98,30 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(401).json({ error: "No session" });
     }
 
+    // Also read directly from Postgres to check persistence
+    let pgDirect = null;
+    try {
+      const store = settingsRepository.store;
+      if (store?.pool) {
+        const result = await store.pool.query("SELECT data FROM app_data WHERE id = 1");
+        if (result.rows.length > 0) {
+          const pgSettings = result.rows[0].data?.settings || [];
+          const realShops = pgSettings.filter(s => !s.shopDomain?.startsWith("_nonce:"));
+          pgDirect = {
+            totalSettings: pgSettings.length,
+            shops: realShops.map(s => ({
+              domain: s.shopDomain,
+              hasToken: Boolean(s.shopifyAccessToken),
+              tokenPrefix: s.shopifyAccessToken ? s.shopifyAccessToken.slice(0, 8) + "..." : "none",
+              scopes: s.shopifyScopes || "none",
+            })),
+          };
+        }
+      }
+    } catch (pgErr) {
+      pgDirect = { error: pgErr.message };
+    }
+
     const shopSettings = settingsRepository.findByShop(session.shopDomain);
     const allSettings = settingsRepository.store?.read?.()?.settings || [];
     const shopDomains = allSettings
@@ -120,6 +144,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       grantedScopes: shopSettings?.shopifyScopes || "unknown",
       configuredScopes,
       allShops: shopDomains,
+      pgDirect,
     });
   });
 

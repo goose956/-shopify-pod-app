@@ -66,8 +66,10 @@ class PostgresStore {
         };
       }
 
+      const settingsCount = this._cache.settings.filter(s => !s.shopDomain?.startsWith("_nonce:")).length;
+      const hasTokens = this._cache.settings.some(s => Boolean(s.shopifyAccessToken));
       this._ready = true;
-      console.log("[PostgresStore] Connected and initialised.");
+      console.log(`[PostgresStore] Connected and initialised. Settings entries: ${settingsCount}, hasTokens: ${hasTokens}`);
     } finally {
       client.release();
     }
