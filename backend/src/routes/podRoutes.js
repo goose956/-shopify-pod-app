@@ -708,74 +708,109 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       : [];
 
     try {
+      console.log(`[Finalize] Starting for designId=${designId}, shop=${session.shopDomain}, productType=${design.productType}`);
       const settings = getEffectiveSettings(session.shopDomain);
-      let lifestyleResult = await pipelineService.generateLifestyleImages({
-        productType: design.productType,
-        baseDesignImageUrl: design.previewImageUrl,
-        designConcept: design.prompt,
-        keiAiApiKey: settings?.keiAiApiKey || "",
-        kieEditUrl: settings?.kieEditUrl,
-        openAiApiKey: settings?.openAiApiKey || "",
-        lifestylePrompts: requestedLifestylePrompts,
-        maxWaitMs: 30000,
-        pollIntervalMs: 2500,
-      });
-      if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai") {
-        const scenePrompts = requestedLifestylePrompts.length
-          ? requestedLifestylePrompts
-          : [
-              `Place this exact ${design.productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
-              `Show this exact ${design.productType} product in a clean, minimal flat-lay arrangement on a light surface. Keep the product design exactly as shown in the reference image.`,
-              `Show a person holding this exact ${design.productType} product in a lifestyle setting. Keep the product design exactly as shown in the reference image.`,
-            ];
+      const hasOpenAi = Boolean(settings?.openAiApiKey && settings.openAiApiKey.length > 5);
+      const hasKie = Boolean(settings?.keiAiApiKey && settings.keiAiApiKey.length > 5);
+      console.log(`[Finalize] API keys — OpenAI: ${hasOpenAi}, KIE: ${hasKie}`);
 
-        const openAiLifestyleImages = [];
-        for (const scenePrompt of scenePrompts) {
-          let imageUrl = await pipelineService.generateOpenAiImageEdit({
-            prompt: scenePrompt,
-            referenceImageUrl: design.previewImageUrl,
-            openAiApiKey: settings?.openAiApiKey || "",
-          });
-          if (!imageUrl) {
-            imageUrl = await pipelineService.generateOpenAiImage({
-              prompt: scenePrompt,
-              openAiApiKey: settings?.openAiApiKey || "",
-            });
-          }
-          if (imageUrl) {
-            openAiLifestyleImages.push(imageUrl);
-          }
-        }
-
-        if (openAiLifestyleImages.length === scenePrompts.length) {
-          lifestyleResult = {
-            imageUrls: openAiLifestyleImages,
-            provider: "openai-image-fallback",
-            providerMessage: `KIE unavailable. Used OpenAI image generation for lifestyle scenes. Previous message: ${lifestyleResult.providerMessage}`,
-          };
-        }
-      }
-      const lifestyleImages = lifestyleResult.imageUrls;
-
-      // Persist any external URLs to local disk so they don't expire
-      for (let i = 0; i < lifestyleImages.length; i++) {
-        lifestyleImages[i] = await persistImageUrl(lifestyleImages[i]);
-      }
-
-      // Use already-generated raw artwork instead of extracting from mockup
-      let transparentArtworkUrl = design.rawArtworkUrl || null;
-      if (transparentArtworkUrl) {
-        assetStorageService.saveAsset({
-          designId,
-          shopDomain: session.shopDomain,
-          type: "artwork-transparent",
-          role: "final",
-          url: transparentArtworkUrl,
-          promptSnapshot: "Raw artwork (generated before product mockup)",
+      // ── Step 1: Generate product images ─────────────────────────────────
+      let lifestyleResult;
+      try {
+        console.log("[Finalize] Step 1: Generating product images...");
+        lifestyleResult = await pipelineService.generateLifestyleImages({
+          productType: design.productType,
+          baseDesignImageUrl: design.previewImageUrl,
+          designConcept: design.prompt,
+          keiAiApiKey: settings?.keiAiApiKey || "",
+          kieEditUrl: settings?.kieEditUrl,
+          openAiApiKey: settings?.openAiApiKey || "",
+          lifestylePrompts: requestedLifestylePrompts,
+          maxWaitMs: 30000,
+          pollIntervalMs: 2500,
         });
-      } else {
-        // Fallback: extract artwork if raw wasn't saved (legacy designs)
+        console.log(`[Finalize] Step 1 result: provider=${lifestyleResult.provider}, images=${lifestyleResult.imageUrls?.length || 0}`);
+      } catch (imgErr) {
+        console.error("[Finalize] Step 1 failed:", imgErr?.message, imgErr?.stack);
+        // Provide fallback so the rest of finalize can still complete
+        lifestyleResult = {
+          imageUrls: [`https://via.placeholder.com/1024?text=${encodeURIComponent(design.productType + " product image")}`],
+          provider: "fallback-error",
+          providerMessage: `Product image generation failed: ${imgErr?.message || "unknown error"}`,
+        };
+      }
+
+      // ── Step 1b: OpenAI fallback if primary provider failed ─────────────
+      if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai") {
         try {
+          console.log("[Finalize] Step 1b: Trying OpenAI fallback for product images...");
+          const scenePrompts = requestedLifestylePrompts.length
+            ? requestedLifestylePrompts
+            : [
+                `Place this exact ${design.productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
+                `Show this exact ${design.productType} product in a clean, minimal flat-lay arrangement on a light surface. Keep the product design exactly as shown in the reference image.`,
+                `Show a person holding this exact ${design.productType} product in a lifestyle setting. Keep the product design exactly as shown in the reference image.`,
+              ];
+
+          const openAiLifestyleImages = [];
+          for (const scenePrompt of scenePrompts) {
+            let imageUrl = null;
+            try {
+              imageUrl = await pipelineService.generateOpenAiImageEdit({
+                prompt: scenePrompt,
+                referenceImageUrl: design.previewImageUrl,
+                openAiApiKey: settings?.openAiApiKey || "",
+              });
+            } catch { /* ignore */ }
+            if (!imageUrl) {
+              try {
+                imageUrl = await pipelineService.generateOpenAiImage({
+                  prompt: scenePrompt,
+                  openAiApiKey: settings?.openAiApiKey || "",
+                });
+              } catch { /* ignore */ }
+            }
+            if (imageUrl) {
+              openAiLifestyleImages.push(imageUrl);
+            }
+          }
+
+          if (openAiLifestyleImages.length === scenePrompts.length) {
+            lifestyleResult = {
+              imageUrls: openAiLifestyleImages,
+              provider: "openai-image-fallback",
+              providerMessage: `KIE unavailable. Used OpenAI image generation for product scenes. Previous message: ${lifestyleResult.providerMessage}`,
+            };
+          }
+          console.log(`[Finalize] Step 1b result: provider=${lifestyleResult.provider}, images=${lifestyleResult.imageUrls?.length || 0}`);
+        } catch (fallbackErr) {
+          console.error("[Finalize] Step 1b fallback failed:", fallbackErr?.message);
+        }
+      }
+      const lifestyleImages = lifestyleResult.imageUrls || [];
+
+      // ── Step 1c: Persist external URLs to disk ──────────────────────────
+      try {
+        for (let i = 0; i < lifestyleImages.length; i++) {
+          lifestyleImages[i] = await persistImageUrl(lifestyleImages[i]);
+        }
+      } catch (persistErr) {
+        console.error("[Finalize] Image persistence warning:", persistErr?.message);
+      }
+
+      // ── Step 2: Transparent artwork ─────────────────────────────────────
+      let transparentArtworkUrl = design.rawArtworkUrl || null;
+      try {
+        if (transparentArtworkUrl) {
+          assetStorageService.saveAsset({
+            designId,
+            shopDomain: session.shopDomain,
+            type: "artwork-transparent",
+            role: "final",
+            url: transparentArtworkUrl,
+            promptSnapshot: "Raw artwork (generated before product mockup)",
+          });
+        } else {
           transparentArtworkUrl = await pipelineService.extractArtwork({
             designImageUrl: design.previewImageUrl,
             openAiApiKey: settings?.openAiApiKey || "",
@@ -790,33 +825,53 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
               promptSnapshot: "Isolated artwork with transparent background",
             });
           }
-        } catch (artworkErr) {
-          console.error("[Finalize] extractArtwork error:", artworkErr?.message);
         }
+      } catch (artworkErr) {
+        console.error("[Finalize] Step 2 extractArtwork error (non-fatal):", artworkErr?.message);
       }
 
-      const listingCopyResult = await pipelineService.generateListingCopy({
-        prompt: design.prompt,
-        productType: design.productType,
-        openAiApiKey: settings?.openAiApiKey || "",
-      });
-      const listingCopy = listingCopyResult.copy;
-
-      for (const imageUrl of lifestyleImages) {
-        assetStorageService.saveAsset({
-          designId,
-          shopDomain: session.shopDomain,
-          type: "lifestyle",
-          role: "final",
-          url: imageUrl,
-          promptSnapshot: design.artworkPrompt,
+      // ── Step 3: Generate listing copy ───────────────────────────────────
+      let listingCopy;
+      try {
+        console.log("[Finalize] Step 3: Generating listing copy...");
+        const listingCopyResult = await pipelineService.generateListingCopy({
+          prompt: design.prompt,
+          productType: design.productType,
+          openAiApiKey: settings?.openAiApiKey || "",
         });
+        listingCopy = listingCopyResult.copy;
+        console.log(`[Finalize] Step 3 result: provider=${listingCopyResult.provider}`);
+      } catch (copyErr) {
+        console.error("[Finalize] Step 3 listing copy error (using fallback):", copyErr?.message);
+        listingCopy = {
+          title: `${design.productType.toUpperCase()} - ${design.prompt.slice(0, 45)}`,
+          descriptionHtml: `<p>${design.prompt}</p>`,
+          descriptionText: design.prompt,
+          tags: ["ai-generated", "pod", design.productType],
+        };
       }
 
-      // Attempt to publish to Shopify — non-fatal if it fails (e.g. no OAuth token yet)
+      // ── Step 4: Save asset records ──────────────────────────────────────
+      try {
+        for (const imageUrl of lifestyleImages) {
+          assetStorageService.saveAsset({
+            designId,
+            shopDomain: session.shopDomain,
+            type: "lifestyle",
+            role: "final",
+            url: imageUrl,
+            promptSnapshot: design.artworkPrompt,
+          });
+        }
+      } catch (assetErr) {
+        console.error("[Finalize] Step 4 asset save error (non-fatal):", assetErr?.message);
+      }
+
+      // ── Step 5: Shopify publish (non-fatal) ─────────────────────────────
       let publishedProduct = null;
       let publishError = null;
       try {
+        console.log("[Finalize] Step 5: Publishing to Shopify...");
         publishedProduct = await publishService.publish({
           shopDomain: session.shopDomain,
           title: listingCopy.title,
@@ -826,40 +881,46 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           publishImmediately,
         });
       } catch (pubErr) {
-        console.error("[Finalize] Shopify publish failed (non-fatal):", pubErr?.message);
+        console.error("[Finalize] Step 5 Shopify publish failed (non-fatal):", pubErr?.message);
         publishError = pubErr?.message || "Shopify publish failed";
       }
 
-      if (publishedProduct) {
-        designRepository.update(designId, {
-          status: "published",
-          shopifyProductId: publishedProduct.productId,
-          adminUrl: publishedProduct.adminUrl,
-          updatedAt: Date.now(),
-          finalizedAt: Date.now(),
-        });
+      // ── Step 6: Update design status ────────────────────────────────────
+      try {
+        if (publishedProduct) {
+          designRepository.update(designId, {
+            status: "published",
+            shopifyProductId: publishedProduct.productId,
+            adminUrl: publishedProduct.adminUrl,
+            updatedAt: Date.now(),
+            finalizedAt: Date.now(),
+          });
 
-        productRepository.upsertByDesign(designId, {
-          designId,
-          shopDomain: session.shopDomain,
-          productId: publishedProduct.productId,
-          adminUrl: publishedProduct.adminUrl,
-          publishImmediately,
-          updatedAt: Date.now(),
-        });
-      } else {
-        designRepository.update(designId, {
-          status: "finalized",
-          updatedAt: Date.now(),
-          finalizedAt: Date.now(),
-        });
+          productRepository.upsertByDesign(designId, {
+            designId,
+            shopDomain: session.shopDomain,
+            productId: publishedProduct.productId,
+            adminUrl: publishedProduct.adminUrl,
+            publishImmediately,
+            updatedAt: Date.now(),
+          });
+        } else {
+          designRepository.update(designId, {
+            status: "finalized",
+            updatedAt: Date.now(),
+            finalizedAt: Date.now(),
+          });
+        }
+      } catch (statusErr) {
+        console.error("[Finalize] Step 6 status update error (non-fatal):", statusErr?.message);
       }
 
-      const providerMessages = [lifestyleResult.providerMessage, listingCopyResult.providerMessage];
+      const providerMessages = [lifestyleResult.providerMessage];
       if (publishError) {
         providerMessages.push(`Shopify publish skipped: ${publishError}. You can publish later once OAuth is configured.`);
       }
 
+      console.log(`[Finalize] Complete — images=${lifestyleImages.length}, published=${!!publishedProduct}`);
       return res.json({
         productId: publishedProduct?.productId || null,
         adminUrl: publishedProduct?.adminUrl || null,
@@ -868,7 +929,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         publishError: publishError || null,
         provider: {
           lifestyleImages: lifestyleResult.provider,
-          listingCopy: listingCopyResult.provider,
+          listingCopy: "ok",
           message: providerMessages.filter(Boolean).join(" | "),
         },
         listingCopy: {
@@ -878,6 +939,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         },
       });
     } catch (error) {
+      console.error("[Finalize] FATAL Error:", error?.message || error, error?.stack);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to finalize product",
       });

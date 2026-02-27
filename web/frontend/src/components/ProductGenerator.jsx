@@ -443,7 +443,8 @@ export function ProductGenerator() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to finalize product.");
+        const errorDetail = data.error || `Server error (${response.status})`;
+        throw new Error(errorDetail);
       }
       const data = await response.json();
       setLifestyleImages(data.lifestyleImages || []);
