@@ -25,9 +25,8 @@ COPY backend/ ./backend/
 # Copy built frontend from stage 1
 COPY --from=frontend-build /app/web/frontend/dist ./web/frontend/dist
 
-# Create uploads directory (will be overridden by Railway volume mount)
-RUN mkdir -p /data/uploads && chown -R appuser:appgroup /data/uploads
-RUN chown -R appuser:appgroup /app
+# Create data directories (uploads + fallback JSON store)
+RUN mkdir -p /data/uploads /app/backend/data && chown -R appuser:appgroup /data /app
 
 USER appuser
 

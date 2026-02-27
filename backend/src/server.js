@@ -68,6 +68,11 @@ async function createServer() {
     credentials: true,
   }));
 
+  // ── Health check (registered early, before DB init) ───────────────────────
+  app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+  });
+
   // ── Data store (PostgreSQL in production, JSON file in dev) ───────────────
   // Created early so repositories are available for webhook handlers.
   let store;
@@ -158,10 +163,6 @@ async function createServer() {
       printfulMockupService,
     })
   );
-
-  app.get("/health", (_req, res) => {
-    res.json({ ok: true });
-  });
 
   // ── Serve built frontend in production ────────────────────────────────────
   const frontendDist = path.join(__dirname, "..", "..", "web", "frontend", "dist");
