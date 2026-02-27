@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const dotenv = require("dotenv");
 const rateLimit = require("express-rate-limit");
+const cors = require("cors");
 
 const { getConfig } = require("./config");
 const { JsonStore } = require("./storage/jsonStore");
@@ -47,6 +48,25 @@ async function createServer() {
     );
     next();
   });
+
+  // ── CORS ──────────────────────────────────────────────────────────────────
+  const allowedOrigins = [
+    /\.myshopify\.com$/,
+    /admin\.shopify\.com$/,
+  ];
+  if (config.shopify.hostName) {
+    allowedOrigins.push(new RegExp(config.shopify.hostName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"));
+  }
+  if (process.env.NODE_ENV !== "production") {
+    allowedOrigins.push(/^http:\/\/localhost(:\d+)?$/);
+  }
+  app.use(cors({
+    origin: (origin, cb) => {
+      if (!origin || allowedOrigins.some((o) => o.test(origin))) return cb(null, true);
+      cb(null, false);
+    },
+    credentials: true,
+  }));
 
   // ── Data store (PostgreSQL in production, JSON file in dev) ───────────────
   // Created early so repositories are available for webhook handlers.
@@ -103,7 +123,16 @@ async function createServer() {
     message: { error: "Too many generation requests. Please wait a moment." },
   });
 
+  const registrationLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many registration attempts. Please try again later." },
+  });
+
   app.use("/api", apiLimiter);
+  app.use("/api/members/register", registrationLimiter);
   app.use("/api/design-preview", aiLimiter);
   app.use("/api/generate-mockup", aiLimiter);
   app.use("/api/extract-artwork", aiLimiter);

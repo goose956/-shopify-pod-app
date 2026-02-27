@@ -640,6 +640,19 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(404).json({ error: "Design not found" });
     }
 
+    // ── Idempotency: if already published, return existing product ──────────
+    if (design.status === "published" && design.shopifyProductId) {
+      return res.json({
+        productId: design.shopifyProductId,
+        adminUrl: design.adminUrl,
+        lifestyleImages: [],
+        transparentArtworkUrl: design.rawArtworkUrl || null,
+        provider: { lifestyleImages: "cached", listingCopy: "cached", message: "Product was already published." },
+        listingCopy: null,
+        alreadyPublished: true,
+      });
+    }
+
     const publishImmediately =
       typeof req.body?.publishImmediately === "boolean"
         ? req.body.publishImmediately

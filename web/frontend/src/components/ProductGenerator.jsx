@@ -142,6 +142,7 @@ export function ProductGenerator() {
   const [winningProductType, setWinningProductType] = useState("tshirt");
   const [winningImageShape, setWinningImageShape] = useState("square");
   const [winningPublishImmediately, setWinningPublishImmediately] = useState(false);
+  const [setupNeeded, setSetupNeeded] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [catalogCategories, setCatalogCategories] = useState([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(false);
@@ -178,6 +179,26 @@ export function ProductGenerator() {
       finally { if (!cancelled) setIsCatalogLoading(false); }
     }
     loadCatalog();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Check if API keys are configured (onboarding)
+  useEffect(() => {
+    let cancelled = false;
+    async function checkSetup() {
+      try {
+        const token = await getSessionToken();
+        const res = await fetch("/api/settings", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setSetupNeeded(!data.settings?.hasOpenAiKey && !data.settings?.hasKieAiKey);
+        }
+      } catch (_) { /* silent */ }
+    }
+    checkSetup();
     return () => { cancelled = true; };
   }, []);
 
@@ -556,6 +577,17 @@ export function ProductGenerator() {
       {error && (
         <Banner tone="critical" title="Something went wrong" onDismiss={() => setError(null)}>
           <p>{error}</p>
+        </Banner>
+      )}
+
+      {/* Onboarding banner */}
+      {setupNeeded && selectedTab === 0 && (
+        <Banner
+          tone="warning"
+          title="Set up your API keys to start generating designs"
+          action={{ content: "Go to Admin", onAction: () => setSelectedTab(5) }}
+        >
+          <p>Add an OpenAI or KIE.ai API key in the Admin tab to enable AI design generation.</p>
         </Banner>
       )}
 

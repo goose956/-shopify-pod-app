@@ -5,7 +5,7 @@ function getConfig() {
     shopify: {
       apiKey: process.env.SHOPIFY_API_KEY || "",
       apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
-      scopes: (process.env.SHOPIFY_SCOPES || "write_products").split(","),
+      scopes: (process.env.SHOPIFY_SCOPES || "read_products,write_products,read_orders,write_orders").split(","),
       hostName: (process.env.SHOPIFY_HOST_NAME || "").replace(/^https?:\/\//, ""),
       apiVersion: process.env.SHOPIFY_API_VERSION || "2025-10",
       adminAccessToken: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || "",

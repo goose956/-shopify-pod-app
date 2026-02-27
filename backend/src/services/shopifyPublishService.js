@@ -1,3 +1,5 @@
+const { retryWithBackoff } = require("../utils/retry");
+
 class ShopifyPublishService {
   constructor(config, settingsRepository) {
     this.config = config;
@@ -33,51 +35,58 @@ class ShopifyPublishService {
       };
     }
 
-    const response = await fetch(`https://${shopDomain}/admin/api/${apiVersion}/graphql.json`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({
-        query: `mutation productCreate($input: ProductInput!) {
-          productCreate(input: $input) {
-            product { id handle }
-            userErrors { field message }
-          }
-        }`,
-        variables: {
-          input: {
-            title,
-            descriptionHtml,
-            status: publishImmediately ? "ACTIVE" : "DRAFT",
-            tags,
-            images: imageUrls.map((src) => ({ src })),
+    return retryWithBackoff(
+      async () => {
+        const response = await fetch(`https://${shopDomain}/admin/api/${apiVersion}/graphql.json`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": accessToken,
           },
-        },
-      }),
-    });
+          body: JSON.stringify({
+            query: `mutation productCreate($input: ProductInput!) {
+              productCreate(input: $input) {
+                product { id handle }
+                userErrors { field message }
+              }
+            }`,
+            variables: {
+              input: {
+                title,
+                descriptionHtml,
+                status: publishImmediately ? "ACTIVE" : "DRAFT",
+                tags,
+                images: imageUrls.map((src) => ({ src })),
+              },
+            },
+          }),
+        });
 
-    if (!response.ok) {
-      throw new Error(`Shopify API error (${response.status})`);
-    }
+        if (!response.ok) {
+          const err = new Error(`Shopify API error (${response.status})`);
+          err.status = response.status;
+          throw err;
+        }
 
-    const payload = await response.json();
-    const userErrors = payload?.data?.productCreate?.userErrors || [];
-    if (userErrors.length > 0) {
-      throw new Error(userErrors[0].message || "productCreate failed");
-    }
+        const payload = await response.json();
+        const userErrors = payload?.data?.productCreate?.userErrors || [];
+        if (userErrors.length > 0) {
+          throw new Error(userErrors[0].message || "productCreate failed");
+        }
 
-    const product = payload?.data?.productCreate?.product;
-    if (!product?.id) {
-      throw new Error("Invalid Shopify productCreate response");
-    }
+        const product = payload?.data?.productCreate?.product;
+        if (!product?.id) {
+          throw new Error("Invalid Shopify productCreate response");
+        }
 
-    const shopSubdomain = shopDomain.split(".")[0];
-    return {
-      productId: product.id,
-      adminUrl: `https://admin.shopify.com/store/${shopSubdomain}/products/${product.id.split("/").pop()}`,
-    };
+        const shopSubdomain = shopDomain.split(".")[0];
+        return {
+          productId: product.id,
+          adminUrl: `https://admin.shopify.com/store/${shopSubdomain}/products/${product.id.split("/").pop()}`,
+        };
+      },
+      { maxRetries: 2, baseDelayMs: 1000, label: "ShopifyPublish" }
+    );
   }
 }
 
