@@ -22,7 +22,7 @@ function getConfig() {
       stabilityApiKey: process.env.STABILITY_API_KEY || "",
     },
     storage: {
-      databaseUrl: process.env.DATABASE_URL || "",
+      databaseUrl: process.env.DATABASE_URL || process.env.DATABASE_PUBLIC_URL || "",
       dataFilePath:
         process.env.APP_DATA_FILE || path.join(__dirname, "..", "data", "store.json"),
       uploadsDir:
