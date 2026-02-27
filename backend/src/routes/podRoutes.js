@@ -99,27 +99,28 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     // Also read directly from Postgres to check persistence
-    let pgDirect = null;
+    let pgDirect = { storeType: "unknown", hasPool: false };
     try {
       const store = settingsRepository.store;
+      pgDirect.storeType = store?.constructor?.name || typeof store;
+      pgDirect.hasPool = Boolean(store?.pool);
       if (store?.pool) {
         const result = await store.pool.query("SELECT data FROM app_data WHERE id = 1");
+        pgDirect.rowCount = result.rows.length;
         if (result.rows.length > 0) {
           const pgSettings = result.rows[0].data?.settings || [];
           const realShops = pgSettings.filter(s => !s.shopDomain?.startsWith("_nonce:"));
-          pgDirect = {
-            totalSettings: pgSettings.length,
-            shops: realShops.map(s => ({
-              domain: s.shopDomain,
-              hasToken: Boolean(s.shopifyAccessToken),
-              tokenPrefix: s.shopifyAccessToken ? s.shopifyAccessToken.slice(0, 8) + "..." : "none",
-              scopes: s.shopifyScopes || "none",
-            })),
-          };
+          pgDirect.totalSettings = pgSettings.length;
+          pgDirect.shops = realShops.map(s => ({
+            domain: s.shopDomain,
+            hasToken: Boolean(s.shopifyAccessToken),
+            tokenPrefix: s.shopifyAccessToken ? s.shopifyAccessToken.slice(0, 8) + "..." : "none",
+            scopes: s.shopifyScopes || "none",
+          }));
         }
       }
     } catch (pgErr) {
-      pgDirect = { error: pgErr.message };
+      pgDirect.error = pgErr.message;
     }
 
     const shopSettings = settingsRepository.findByShop(session.shopDomain);
