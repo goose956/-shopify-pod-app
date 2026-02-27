@@ -498,7 +498,7 @@ class PodPipelineService {
         filename = `reference.${mimeType.includes("jpeg") ? "jpg" : "png"}`;
       } else if (String(referenceImageUrl).startsWith("/uploads/")) {
         // Read from local uploads directory
-        const localPath = path.join(UPLOADS_DIR, path.basename(referenceImageUrl));
+        const localPath = path.join(this.uploadsDir, path.basename(referenceImageUrl));
         if (fs.existsSync(localPath)) {
           const buffer = fs.readFileSync(localPath);
           const ext = path.extname(localPath).toLowerCase();
