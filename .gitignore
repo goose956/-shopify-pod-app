@@ -5,6 +5,7 @@ node_modules/
 dist/
 coverage/
 backend/data/store.json
+backend/data/uploads/
 *.bak
 *.bak2
 .venv/

@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("path");
 const dotenv = require("dotenv");
 
 const { getConfig } = require("./config");
@@ -14,6 +15,7 @@ const { AnalyticsService } = require("./services/analyticsService");
 const { PodPipelineService } = require("./services/podPipelineService");
 const { AssetStorageService } = require("./services/assetStorageService");
 const { ShopifyPublishService } = require("./services/shopifyPublishService");
+const { PrintfulMockupService } = require("./services/printfulMockupService");
 const { createPodRouter } = require("./routes/podRoutes");
 
 dotenv.config();
@@ -21,6 +23,10 @@ dotenv.config();
 function createServer() {
   const app = express();
   app.use(express.json({ limit: "20mb" }));
+
+  // Serve uploaded images as static files
+  const uploadsDir = path.join(__dirname, "..", "data", "uploads");
+  app.use("/uploads", express.static(uploadsDir, { maxAge: "7d" }));
 
   const config = getConfig();
   const store = new JsonStore(config.storage.dataFilePath);
@@ -37,6 +43,7 @@ function createServer() {
   const pipelineService = new PodPipelineService();
   const assetStorageService = new AssetStorageService(assetRepository);
   const publishService = new ShopifyPublishService(config);
+  const printfulMockupService = new PrintfulMockupService();
 
   app.use("/api", (req, _res, next) => {
     analyticsService.track(req);
@@ -56,6 +63,7 @@ function createServer() {
       pipelineService,
       assetStorageService,
       publishService,
+      printfulMockupService,
     })
   );
 

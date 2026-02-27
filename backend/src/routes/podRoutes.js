@@ -1,6 +1,6 @@
 const express = require("express");
 
-function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService }) {
+function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService }) {
   const router = express.Router();
 
   async function resolveSession(req) {
@@ -109,6 +109,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       openAiApiKey: settings?.openAiApiKey || "",
       kieGenerateUrl: settings?.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
       kieEditUrl: settings?.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+      printfulApiKey: settings?.printfulApiKey || "",
       updatedAt: settings?.updatedAt || null,
     });
   });
@@ -124,6 +125,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const hasOpenAiApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "openAiApiKey");
     const hasKieGenerateUrl = Object.prototype.hasOwnProperty.call(req.body || {}, "kieGenerateUrl");
     const hasKieEditUrl = Object.prototype.hasOwnProperty.call(req.body || {}, "kieEditUrl");
+    const hasPrintfulApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "printfulApiKey");
 
     const keiAiApiKey = hasKeiApiKey
       ? String(req.body?.keiAiApiKey || "").trim()
@@ -137,12 +139,16 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const kieEditUrl = (hasKieEditUrl
       ? String(req.body?.kieEditUrl || "").trim()
       : String(existing?.kieEditUrl || "").trim()) || "https://api.kie.ai/api/v1/gpt4o-image/generate";
+    const printfulApiKey = hasPrintfulApiKey
+      ? String(req.body?.printfulApiKey || "").trim()
+      : String(existing?.printfulApiKey || "").trim();
 
     const settings = settingsRepository.upsertByShop(session.shopDomain, {
       keiAiApiKey,
       openAiApiKey,
       kieGenerateUrl,
       kieEditUrl,
+      printfulApiKey,
     });
 
     return res.json({
@@ -151,6 +157,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       openAiApiKey: settings.openAiApiKey,
       kieGenerateUrl: settings.kieGenerateUrl,
       kieEditUrl: settings.kieEditUrl,
+      printfulApiKey: settings.printfulApiKey,
       updatedAt: settings.updatedAt,
     });
   });
@@ -290,6 +297,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     try {
       const settings = settingsRepository.findByShop(session.shopDomain);
+
+      // Generate ONLY the raw isolated artwork (mockup comes later when user approves)
       const artworkPrompt = await pipelineService.buildArtworkPrompt({ prompt, productType });
       let designResult = await pipelineService.generateDesignImage({
         artworkPrompt,
@@ -300,7 +309,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         maxWaitMs: 30000,
         pollIntervalMs: 2500,
       });
-      const designImageUrl = designResult.imageUrl;
+      const rawArtworkUrl = designResult.imageUrl;
 
       const design = pipelineService.createDesignRecord({
         shopDomain: session.shopDomain,
@@ -308,15 +317,16 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         productType,
         publishImmediately,
         artworkPrompt,
-        designImageUrl,
+        designImageUrl: rawArtworkUrl,
       });
+      design.rawArtworkUrl = rawArtworkUrl;
 
       const previewAsset = assetStorageService.saveAsset({
         designId: design.id,
         shopDomain: session.shopDomain,
-        type: "design-preview",
+        type: "artwork-raw",
         role: "base",
-        url: designImageUrl,
+        url: rawArtworkUrl,
         promptSnapshot: artworkPrompt,
       });
 
@@ -327,7 +337,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
       return res.json({
         designId: savedDesign.id,
-        designImageUrl,
+        rawArtworkUrl,
         provider: {
           designImage: designResult.provider,
           message: designResult.providerMessage,
@@ -336,6 +346,143 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     } catch (error) {
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to generate design preview",
+      });
+    }
+  });
+
+  // Printful product catalog with images
+  router.get("/printful-catalog", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      if (!settings?.printfulApiKey) {
+        return res.json({ products: [], source: "no-key" });
+      }
+
+      const catalog = await printfulMockupService.getProductCatalog(settings.printfulApiKey);
+      return res.json(catalog);
+    } catch (error) {
+      console.error("[Catalog] Error:", error?.message);
+      return res.status(500).json({ error: "Failed to fetch product catalog" });
+    }
+  });
+
+  // Generate product mockup from approved artwork
+  router.post("/generate-mockup", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) {
+      return;
+    }
+
+    const designId = String(req.body?.designId || "").trim();
+    if (!designId) {
+      return res.status(400).json({ error: "designId is required" });
+    }
+
+    const design = designRepository.findById(designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    const rawArtworkUrl = design.rawArtworkUrl || design.previewImageUrl;
+    if (!rawArtworkUrl) {
+      return res.status(400).json({ error: "No artwork found to create mockup from" });
+    }
+
+    try {
+      const settings = settingsRepository.findByShop(session.shopDomain);
+      const imageShape = String(req.body?.imageShape || "square").trim().toLowerCase();
+      const printfulProductId = req.body?.printfulProductId || null;
+
+      // Try Printful first (free, professional mockups)
+      if (printfulMockupService && settings?.printfulApiKey) {
+        console.log(`[Mockup] Trying Printful for ${design.productType}${printfulProductId ? ` (Printful #${printfulProductId})` : ""}...`);
+        const printfulResult = await printfulMockupService.generateMockup({
+          printfulApiKey: settings.printfulApiKey,
+          artworkUrl: rawArtworkUrl,
+          productType: design.productType,
+          printfulProductId,
+          maxWaitMs: 60000,
+          pollIntervalMs: 3000,
+        });
+
+        if (printfulResult.provider === "printful" && printfulResult.mockupUrls.length > 0) {
+          const designImageUrl = printfulResult.mockupUrls[0];
+
+          assetStorageService.saveAsset({
+            designId,
+            shopDomain: session.shopDomain,
+            type: "design-preview",
+            role: "mockup",
+            url: designImageUrl,
+            promptSnapshot: "Printful mockup",
+          });
+
+          designRepository.update(designId, {
+            previewImageUrl: designImageUrl,
+            mockupImageUrl: designImageUrl,
+            updatedAt: Date.now(),
+          });
+
+          return res.json({
+            designId,
+            designImageUrl,
+            allMockupUrls: printfulResult.mockupUrls,
+            provider: {
+              designImage: printfulResult.provider,
+              message: printfulResult.providerMessage,
+            },
+          });
+        }
+        console.log(`[Mockup] Printful unavailable: ${printfulResult.providerMessage}. Falling back to AI.`);
+      }
+
+      // Fallback: AI-generated mockup
+      const mockupPrompt = pipelineService.buildMockupPrompt({ productType: design.productType, designConcept: design.prompt });
+
+      let mockupResult = await pipelineService.generateDesignImage({
+        artworkPrompt: mockupPrompt,
+        openAiApiKey: settings?.openAiApiKey || "",
+        keiAiApiKey: settings?.keiAiApiKey || "",
+        kieGenerateUrl: settings?.kieGenerateUrl,
+        referenceImageUrl: rawArtworkUrl,
+        imageShape,
+        maxWaitMs: 30000,
+        pollIntervalMs: 2500,
+      });
+
+      const designImageUrl = mockupResult.imageUrl;
+
+      assetStorageService.saveAsset({
+        designId,
+        shopDomain: session.shopDomain,
+        type: "design-preview",
+        role: "mockup",
+        url: designImageUrl,
+        promptSnapshot: mockupPrompt,
+      });
+
+      designRepository.update(designId, {
+        previewImageUrl: designImageUrl,
+        mockupImageUrl: designImageUrl,
+        updatedAt: Date.now(),
+      });
+
+      return res.json({
+        designId,
+        designImageUrl,
+        provider: {
+          designImage: mockupResult.provider,
+          message: mockupResult.providerMessage,
+        },
+      });
+    } catch (error) {
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to generate product mockup",
       });
     }
   });
@@ -365,13 +512,15 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         productType: design.productType,
         amendment,
       });
-      const revisionPrompt = `Edit the provided product design image. Keep the same overall composition, subject, and visual style. Apply only this change: ${amendment}`;
+      // Revise the raw artwork (not the mockup)
+      const referenceUrl = design.rawArtworkUrl || design.previewImageUrl;
+      const revisionPrompt = `Edit the provided artwork design. Keep the same overall composition, subject, and visual style. Apply only this change: ${amendment}`;
       let designResult = await pipelineService.generateDesignImage({
         artworkPrompt: revisionPrompt,
         openAiApiKey: settings?.openAiApiKey || "",
         keiAiApiKey: settings?.keiAiApiKey || "",
         kieGenerateUrl: settings?.kieEditUrl || settings?.kieGenerateUrl,
-        referenceImageUrl: design.previewImageUrl,
+        referenceImageUrl: referenceUrl,
         maxWaitMs: 20000,
         pollIntervalMs: 2500,
       });
@@ -387,7 +536,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           openAiApiKey: settings?.openAiApiKey || "",
           keiAiApiKey: settings?.keiAiApiKey || "",
           kieGenerateUrl: settings?.kieEditUrl || settings?.kieGenerateUrl,
-          referenceImageUrl: shouldRetryWithoutReference ? undefined : design.previewImageUrl,
+          referenceImageUrl: shouldRetryWithoutReference ? undefined : referenceUrl,
           maxWaitMs: 70000,
           pollIntervalMs: 3000,
         });
@@ -417,6 +566,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       designRepository.update(designId, {
         artworkPrompt,
         previewImageUrl: designImageUrl,
+        rawArtworkUrl: designImageUrl,
         currentDesignAssetId: revisedAsset.id,
         revisionCount: Number(design.revisionCount || 0) + 1,
         status: "preview_ready",
@@ -426,6 +576,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.json({
         designId,
         designImageUrl,
+        rawArtworkUrl: designImageUrl,
         provider: {
           designImage: designResult.provider,
           message: designResult.providerMessage,
@@ -514,25 +665,37 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       }
       const lifestyleImages = lifestyleResult.imageUrls;
 
-      // Extract isolated artwork with transparent background
-      let transparentArtworkUrl = null;
-      try {
-        transparentArtworkUrl = await pipelineService.extractArtwork({
-          designImageUrl: design.previewImageUrl,
-          openAiApiKey: settings?.openAiApiKey || "",
+      // Use already-generated raw artwork instead of extracting from mockup
+      let transparentArtworkUrl = design.rawArtworkUrl || null;
+      if (transparentArtworkUrl) {
+        assetStorageService.saveAsset({
+          designId,
+          shopDomain: session.shopDomain,
+          type: "artwork-transparent",
+          role: "final",
+          url: transparentArtworkUrl,
+          promptSnapshot: "Raw artwork (generated before product mockup)",
         });
-        if (transparentArtworkUrl) {
-          assetStorageService.saveAsset({
-            designId,
-            shopDomain: session.shopDomain,
-            type: "artwork-transparent",
-            role: "final",
-            url: transparentArtworkUrl,
-            promptSnapshot: "Isolated artwork with transparent background",
+      } else {
+        // Fallback: extract artwork if raw wasn't saved (legacy designs)
+        try {
+          transparentArtworkUrl = await pipelineService.extractArtwork({
+            designImageUrl: design.previewImageUrl,
+            openAiApiKey: settings?.openAiApiKey || "",
           });
+          if (transparentArtworkUrl) {
+            assetStorageService.saveAsset({
+              designId,
+              shopDomain: session.shopDomain,
+              type: "artwork-transparent",
+              role: "final",
+              url: transparentArtworkUrl,
+              promptSnapshot: "Isolated artwork with transparent background",
+            });
+          }
+        } catch (artworkErr) {
+          console.error("[Finalize] extractArtwork error:", artworkErr?.message);
         }
-      } catch (artworkErr) {
-        console.error("[Finalize] extractArtwork error:", artworkErr?.message);
       }
 
       const listingCopyResult = await pipelineService.generateListingCopy({

@@ -1,4 +1,25 @@
 const { randomUUID } = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+const UPLOADS_DIR = path.join(__dirname, "..", "..", "data", "uploads");
+
+function saveBase64ToDisk(base64Data, mimeType = "image/png") {
+  try {
+    if (!fs.existsSync(UPLOADS_DIR)) {
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    }
+    const ext = mimeType.includes("webp") ? "webp" : mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpg" : "png";
+    const filename = `${randomUUID()}.${ext}`;
+    const filePath = path.join(UPLOADS_DIR, filename);
+    fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
+    console.log(`[Image] Saved ${(Buffer.byteLength(base64Data, "base64") / 1024).toFixed(0)}KB image to ${filename}`);
+    return `/uploads/${filename}`;
+  } catch (err) {
+    console.error("[Image] Failed to save base64 to disk:", err?.message);
+    return null;
+  }
+}
 
 class PodPipelineService {
   constructor(analyticsService) {
@@ -241,7 +262,22 @@ class PodPipelineService {
 
   async buildArtworkPrompt({ prompt, productType, amendment = "" }) {
     const amendmentText = amendment.trim() ? ` with revision: ${amendment.trim()}` : "";
-    return `${productType} design inspired by: ${prompt}${amendmentText}`;
+    return `Create a clean, isolated artwork design for print-on-demand. The design concept: ${prompt}${amendmentText}. Render the artwork on a SOLID WHITE background. The background must be pure white (#FFFFFF) with absolutely no transparency. No product, no mockup, no surface — just the standalone graphic/illustration on a flat white background, ready to be printed.`;
+  }
+
+  buildMockupPrompt({ productType, designConcept }) {
+    return [
+      `Create a clean, photorealistic ${productType} product mockup.`,
+      `The provided reference image is the EXACT artwork to be printed on the ${productType}.`,
+      `CRITICAL RULES:`,
+      `- Reproduce the reference artwork EXACTLY as-is on the product — same colors, same composition, same details.`,
+      `- Do NOT add any drop shadows, glows, outlines, or effects to the artwork.`,
+      `- Do NOT modify, reinterpret, or "improve" the artwork in any way.`,
+      `- Use a clean, plain white or very light neutral background.`,
+      `- Soft, even studio lighting with no harsh shadows on the product.`,
+      `- The ${productType} should be shown straight-on, centered, with the artwork clearly visible.`,
+      `- No extra props, decorations, or text outside the artwork itself.`,
+    ].join("\n");
   }
 
   async analyzeProductImage({ imageBase64, openAiApiKey }) {
@@ -314,6 +350,7 @@ class PodPipelineService {
           prompt: artworkPrompt,
           referenceImageUrl,
           openAiApiKey,
+          imageShape,
         });
         usedReferenceImage = Boolean(openAiImageUrl);
       }
@@ -424,10 +461,12 @@ class PodPipelineService {
         return url;
       }
 
-      // gpt-image-1 returns b64_json — store it as a data URI so the rest of the pipeline
-      // can display it, but flag it so edit calls skip fetching it as a URL reference
+      // gpt-image-1 returns b64_json — save to disk and return a local URL
       const b64 = payload?.data?.[0]?.b64_json;
       if (b64) {
+        const localUrl = saveBase64ToDisk(b64, "image/png");
+        if (localUrl) return localUrl;
+        // Fallback to data URI if disk save fails
         return `data:image/png;base64,${b64}`;
       }
 
@@ -438,7 +477,7 @@ class PodPipelineService {
     }
   }
 
-  async generateOpenAiImageEdit({ prompt, referenceImageUrl, openAiApiKey }) {
+  async generateOpenAiImageEdit({ prompt, referenceImageUrl, openAiApiKey, imageShape }) {
     if (!this.isUsableApiKey(openAiApiKey) || !String(referenceImageUrl || "").trim()) {
       return null;
     }
@@ -459,6 +498,19 @@ class PodPipelineService {
         const buffer = Buffer.from(base64Data, "base64");
         imageBlob = new Blob([buffer], { type: mimeType });
         filename = `reference.${mimeType.includes("jpeg") ? "jpg" : "png"}`;
+      } else if (String(referenceImageUrl).startsWith("/uploads/")) {
+        // Read from local uploads directory
+        const localPath = path.join(UPLOADS_DIR, path.basename(referenceImageUrl));
+        if (fs.existsSync(localPath)) {
+          const buffer = fs.readFileSync(localPath);
+          const ext = path.extname(localPath).toLowerCase();
+          const mimeType = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : ext === ".webp" ? "image/webp" : "image/png";
+          imageBlob = new Blob([buffer], { type: mimeType });
+          filename = `reference${ext}`;
+        } else {
+          console.warn("[OpenAI] generateOpenAiImageEdit: local file not found:", localPath);
+          return null;
+        }
       } else {
         const sourceResponse = await fetch(referenceImageUrl);
         if (!sourceResponse.ok) {
@@ -469,11 +521,13 @@ class PodPipelineService {
         filename = `reference.${contentType.includes("jpeg") ? "jpg" : "png"}`;
       }
 
+      const openAiSize = this.getOpenAiSize(imageShape);
+
       const buildForm = (model) => {
         const form = new FormData();
         form.append("model", model);
         form.append("prompt", prompt);
-        form.append("size", "1024x1024");
+        form.append("size", openAiSize);
         form.append("image", imageBlob, filename);
         return form;
       };
@@ -512,9 +566,11 @@ class PodPipelineService {
         return url;
       }
 
-      const b64 = payload?.data?.[0]?.b64_json;
-      if (b64) {
-        return `data:image/png;base64,${b64}`;
+      const b64Edit = payload?.data?.[0]?.b64_json;
+      if (b64Edit) {
+        const localUrl = saveBase64ToDisk(b64Edit, "image/png");
+        if (localUrl) return localUrl;
+        return `data:image/png;base64,${b64Edit}`;
       }
 
       return null;
@@ -776,8 +832,12 @@ class PodPipelineService {
       const url = payload?.data?.[0]?.url;
       if (url) return url;
 
-      const b64 = payload?.data?.[0]?.b64_json;
-      if (b64) return `data:image/png;base64,${b64}`;
+      const b64Extract = payload?.data?.[0]?.b64_json;
+      if (b64Extract) {
+        const localUrl = saveBase64ToDisk(b64Extract, "image/png");
+        if (localUrl) return localUrl;
+        return `data:image/png;base64,${b64Extract}`;
+      }
 
       return null;
     } catch (err) {
@@ -804,6 +864,7 @@ class PodPipelineService {
       shopifyProductId: "",
       adminUrl: "",
       previewImageUrl: designImageUrl,
+      rawArtworkUrl: designImageUrl,
     };
   }
 }

@@ -72,6 +72,7 @@ export function AdminDashboard() {
   const [openAiApiKey, setOpenAiApiKey] = useState("");
   const [kieGenerateUrl, setKieGenerateUrl] = useState("https://api.kie.ai/api/v1/gpt4o-image/generate");
   const [kieEditUrl, setKieEditUrl] = useState("https://api.kie.ai/api/v1/gpt4o-image/generate");
+  const [printfulApiKey, setPrintfulApiKey] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState("");
   const [settingsError, setSettingsError] = useState("");
@@ -139,6 +140,7 @@ export function AdminDashboard() {
       setKeiAiApiKey(data.keiAiApiKey || "");
       setKieGenerateUrl(data.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate");
       setKieEditUrl(data.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate");
+      setPrintfulApiKey(data.printfulApiKey || "");
     } catch (err) {
       setSettingsError(err.message || "Failed to load API keys");
     }
@@ -155,7 +157,7 @@ export function AdminDashboard() {
       const response = await fetch("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
-        body: JSON.stringify({ keiAiApiKey, openAiApiKey, kieGenerateUrl, kieEditUrl }),
+        body: JSON.stringify({ keiAiApiKey, openAiApiKey, kieGenerateUrl, kieEditUrl, printfulApiKey }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -167,7 +169,7 @@ export function AdminDashboard() {
     } finally {
       setIsSavingSettings(false);
     }
-  }, [keiAiApiKey, openAiApiKey, kieGenerateUrl, kieEditUrl]);
+  }, [keiAiApiKey, openAiApiKey, kieGenerateUrl, kieEditUrl, printfulApiKey]);
 
   const testKieConnection = useCallback(async () => {
     setKieTestMessage("");
@@ -439,6 +441,19 @@ export function AdminDashboard() {
                 {openAiTestMessage && <Banner tone={openAiTestTone}><p>{openAiTestMessage}</p></Banner>}
               </BlockStack>
             </Box>
+            <Box background="bg-surface-secondary" borderRadius="300" padding="400" borderWidth="025" borderColor="border">
+              <BlockStack gap="300">
+                <InlineStack gap="200" blockAlign="center">
+                  <Badge tone="info">Mockups</Badge>
+                  <Text variant="headingSm" as="h3">Printful</Text>
+                </InlineStack>
+                <FormLayout>
+                  <TextField label="API Token" type="password" value={printfulApiKey} onChange={setPrintfulApiKey} autoComplete="off" placeholder="Your Printful API token" helpText="Free at printful.com → Dashboard → Settings → API" />
+                </FormLayout>
+              </BlockStack>
+            </Box>
+          </InlineGrid>
+          <InlineGrid columns={{ xs: 1, sm: 2 }} gap="400">
             <Box background="bg-surface-secondary" borderRadius="300" padding="400" borderWidth="025" borderColor="border">
               <BlockStack gap="300">
                 <InlineStack gap="200" blockAlign="center">

@@ -49,6 +49,7 @@ function openImageFullSize(url) {
 }
 
 function ImagePreviewCard({ imageUrl, label, size = "medium", onOpen }) {
+  const [imgError, setImgError] = useState(false);
   const widths = { small: 120, medium: 200, large: 280 };
   const w = widths[size] || widths.medium;
   return (
@@ -63,19 +64,35 @@ function ImagePreviewCard({ imageUrl, label, size = "medium", onOpen }) {
         borderRadius: 12,
         padding: 12,
         flex: 1,
+        minWidth: 0,
+        overflow: "hidden",
       }}
     >
-      <img
-        src={imageUrl}
-        alt={label}
-        style={{
-          width: w,
-          height: w,
-          objectFit: "cover",
-          borderRadius: 8,
-          display: "block",
-        }}
-      />
+      {!imgError && imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={label}
+          onError={() => setImgError(true)}
+          style={{
+            width: "100%",
+            maxWidth: w,
+            height: "auto",
+            maxHeight: w,
+            objectFit: "contain",
+            borderRadius: 8,
+            display: "block",
+          }}
+        />
+      ) : (
+        <div style={{
+          width: "100%", maxWidth: w, height: w,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "#e1e3e5", borderRadius: 8, color: "#666", fontSize: 12,
+          textAlign: "center", padding: 16,
+        }}>
+          {imgError ? "Image failed to load" : "No image"}
+        </div>
+      )}
       {label && (
         <Text variant="bodySm" tone="subdued" as="p" alignment="center">
           {label}
@@ -97,9 +114,11 @@ export function ProductGenerator() {
   const [imageShape, setImageShape] = useState("square");
   const [publishImmediately, setPublishImmediately] = useState(false);
   const [isGeneratingDesign, setIsGeneratingDesign] = useState(false);
+  const [isGeneratingMockup, setIsGeneratingMockup] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [designId, setDesignId] = useState("");
   const [designImageUrl, setDesignImageUrl] = useState("");
+  const [rawArtworkUrl, setRawArtworkUrl] = useState("");
   const [providerStatus, setProviderStatus] = useState(null);
   const [amendment, setAmendment] = useState("");
   const [lifestyleImages, setLifestyleImages] = useState([]);
@@ -123,9 +142,71 @@ export function ProductGenerator() {
   const [winningProductType, setWinningProductType] = useState("tshirt");
   const [winningImageShape, setWinningImageShape] = useState("square");
   const [winningPublishImmediately, setWinningPublishImmediately] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState([]);
+  const [catalogCategories, setCatalogCategories] = useState([]);
+  const [isCatalogLoading, setIsCatalogLoading] = useState(false);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogCategory, setCatalogCategory] = useState("All");
+  const [selectedPrintfulId, setSelectedPrintfulId] = useState(null);
+  const [selectedPrintfulTitle, setSelectedPrintfulTitle] = useState("");
+  const [productSourceMode, setProductSourceMode] = useState("dropdown");
 
-  const handleProductTypeChange = useCallback((value) => setProductType(value), []);
+  const handleProductTypeChange = useCallback((value) => {
+    setProductType(value);
+    setSelectedPrintfulId(null);
+    setSelectedPrintfulTitle("");
+  }, []);
   const handleImageShapeChange = useCallback((value) => setImageShape(value), []);
+
+  // Fetch full Printful catalog once
+  useEffect(() => {
+    let cancelled = false;
+    async function loadCatalog() {
+      try {
+        setIsCatalogLoading(true);
+        const token = await getSessionToken();
+        const res = await fetch("/api/printful-catalog", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.products?.length) {
+          setCatalogProducts(data.products);
+          setCatalogCategories(data.categories || []);
+        }
+      } catch (_) { /* silent */ }
+      finally { if (!cancelled) setIsCatalogLoading(false); }
+    }
+    loadCatalog();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Select a product from the Printful catalog
+  const handleCatalogSelect = useCallback((product, setter) => {
+    setSelectedPrintfulId(product.id);
+    setSelectedPrintfulTitle(product.title);
+    // Map Printful category to our product type dropdown as best we can
+    const typeMap = {
+      "T-SHIRT": "tshirt", "CUT-SEW": "tshirt", "DTFILM": "tshirt",
+      "EMBROIDERY": "hoodie", "KNITWEAR": "sweatshirt",
+      "MUG": "mug", "DRINKWARE": "mug",
+      "POSTER": "poster", "FRAMED-POSTER": "poster", "POSTCARD": "poster",
+      "CANVAS": "canvasprint",
+      "DECOR": "pillow",
+    };
+    const mapped = typeMap[product.type] || "tshirt";
+    setter(mapped);
+  }, []);
+
+  // Filter catalog products by search + category
+  const filteredCatalog = catalogProducts.filter((p) => {
+    if (catalogCategory !== "All" && p.category !== catalogCategory) return false;
+    if (catalogSearch.trim()) {
+      const q = catalogSearch.toLowerCase();
+      return p.title.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+    }
+    return true;
+  });
   const handleLifestyleImageCountChange = useCallback((value) => {
     const nextCount = Math.max(1, Math.min(6, Number(value) || 1));
     setLifestyleImageCount(String(nextCount));
@@ -150,7 +231,7 @@ export function ProductGenerator() {
     { label: "Mug", value: "mug" },
     { label: "Poster", value: "poster" },
     { label: "Canvas Print", value: "canvas" },
-    { label: "Phone Case", value: "phonecase" },
+    { label: "Pillow", value: "pillow" },
     { label: "Tote Bag", value: "totebag" },
   ];
   const imageShapeOptions = [
@@ -163,7 +244,7 @@ export function ProductGenerator() {
   const lifestyleCountOptions = ["1", "2", "3", "4", "5", "6"].map((v) => ({ label: v, value: v }));
 
   // Determine which tabs are unlocked
-  const hasDesign = Boolean(designId && designImageUrl);
+  const hasDesign = Boolean(designId && (rawArtworkUrl || designImageUrl));
   const hasLifestyle = lifestyleImages.length > 0;
   const hasPublished = Boolean(finalProduct?.adminUrl);
 
@@ -224,6 +305,7 @@ export function ProductGenerator() {
   const handleGenerateDesign = async () => {
     setError(null);
     setDesignImageUrl("");
+    setRawArtworkUrl("");
     setDesignId("");
     setLifestyleImages([]);
     setListingCopy(null);
@@ -248,7 +330,8 @@ export function ProductGenerator() {
       }
       const data = await response.json();
       setDesignId(data.designId);
-      setDesignImageUrl(data.designImageUrl);
+      setRawArtworkUrl(data.rawArtworkUrl || "");
+      setDesignImageUrl("");
       setProviderStatus((prev) => ({
         ...(prev || {}),
         designImage: data.provider?.designImage || "unknown",
@@ -278,7 +361,8 @@ export function ProductGenerator() {
         throw new Error(data.error || "Failed to revise design.");
       }
       const data = await response.json();
-      setDesignImageUrl(data.designImageUrl);
+      setRawArtworkUrl(data.rawArtworkUrl || data.designImageUrl || rawArtworkUrl);
+      setDesignImageUrl("");
       setAmendment("");
       setProviderStatus((prev) => ({
         ...(prev || {}),
@@ -289,6 +373,34 @@ export function ProductGenerator() {
       setError(err.message || "Failed to revise design.");
     } finally {
       setIsGeneratingDesign(false);
+    }
+  };
+
+  const handleGenerateMockup = async () => {
+    setError(null);
+    setIsGeneratingMockup(true);
+    try {
+      const sessionToken = await getSessionToken();
+      const response = await fetch("/api/generate-mockup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
+        body: JSON.stringify({ designId, imageShape, printfulProductId: selectedPrintfulId }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to generate product mockup.");
+      }
+      const data = await response.json();
+      setDesignImageUrl(data.designImageUrl);
+      setProviderStatus((prev) => ({
+        ...(prev || {}),
+        mockup: data.provider?.designImage || "unknown",
+        mockupMessage: data.provider?.message || "",
+      }));
+    } catch (err) {
+      setError(err.message || "Failed to generate product mockup.");
+    } finally {
+      setIsGeneratingMockup(false);
     }
   };
 
@@ -331,7 +443,7 @@ export function ProductGenerator() {
     }
   };
 
-  const isWorking = isGeneratingDesign || isFinalizing;
+  const isWorking = isGeneratingDesign || isGeneratingMockup || isFinalizing;
 
   return (
     <BlockStack gap="400">
@@ -460,6 +572,7 @@ export function ProductGenerator() {
               transition: "all 0.15s ease",
               opacity: inputMode === "describe" ? 1 : 0.55,
               cursor: inputMode === "describe" ? "default" : "pointer",
+              minWidth: 0, overflow: "hidden",
             }}
           >
             <Card>
@@ -495,7 +608,70 @@ export function ProductGenerator() {
                       multiline={3}
                       autoComplete="off"
                     />
-                    <Select label="Product type" options={productTypeOptions} onChange={handleProductTypeChange} value={productType} />
+                    <div>
+                      <div style={{ marginBottom: 4 }}><Text variant="bodyMd" as="label" fontWeight="semibold">Product type</Text></div>
+                      {catalogProducts.length > 0 && (
+                        <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 8, overflow: "hidden", border: "1px solid #c9cccf" }}>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("dropdown"); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: productSourceMode === "dropdown" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "dropdown" ? "#fff" : "#555", transition: "all 0.15s" }}>Quick Select</button>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("printful"); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", borderLeft: "1px solid #c9cccf", cursor: "pointer", background: productSourceMode === "printful" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "printful" ? "#fff" : "#555", transition: "all 0.15s" }}>Printful Catalog ({catalogProducts.length})</button>
+                        </div>
+                      )}
+                      {productSourceMode === "dropdown" && (
+                        <Select label="" options={productTypeOptions} onChange={handleProductTypeChange} value={productType} />
+                      )}
+                      {productSourceMode === "printful" && (
+                        <div>
+                          {selectedPrintfulId && (
+                            <div style={{ padding: "6px 10px", background: "#e8f5ff", borderRadius: 6, fontSize: 12, color: "#005bd3", marginBottom: 8 }}>
+                              Selected: <strong>{selectedPrintfulTitle}</strong>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ marginLeft: 8, background: "none", border: "none", color: "#bf0711", cursor: "pointer", fontSize: 12 }}>Clear</button>
+                            </div>
+                          )}
+                          <input
+                            type="text"
+                            value={catalogSearch}
+                            onChange={(e) => setCatalogSearch(e.target.value)}
+                            placeholder="Search 468 products..."
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              width: "100%", padding: "8px 10px", border: "1px solid #c9cccf", borderRadius: 6,
+                              fontSize: 13, marginBottom: 8, outline: "none", boxSizing: "border-box",
+                            }}
+                          />
+                          <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 8, paddingBottom: 4 }}>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); setCatalogCategory("All"); }} style={{ padding: "3px 8px", borderRadius: 12, border: catalogCategory === "All" ? "2px solid #005bd3" : "1px solid #c9cccf", background: catalogCategory === "All" ? "#005bd3" : "#fff", color: catalogCategory === "All" ? "#fff" : "#333", fontSize: 11, cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}>All</button>
+                            {catalogCategories.map((cat) => (
+                              <button key={cat} type="button" onClick={(e) => { e.stopPropagation(); setCatalogCategory(cat); }} style={{ padding: "3px 8px", borderRadius: 12, border: catalogCategory === cat ? "2px solid #005bd3" : "1px solid #c9cccf", background: catalogCategory === cat ? "#005bd3" : "#fff", color: catalogCategory === cat ? "#fff" : "#333", fontSize: 11, cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}>{cat}</button>
+                            ))}
+                          </div>
+                          <div style={{ maxHeight: 220, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+                            {filteredCatalog.slice(0, 60).map((cp) => (
+                              <div
+                                key={cp.id}
+                                onClick={(e) => { e.stopPropagation(); handleCatalogSelect(cp, setProductType); }}
+                                style={{
+                                  border: selectedPrintfulId === cp.id ? "2px solid #005bd3" : "1px solid #e3e5e7",
+                                  borderRadius: 6, padding: 4, cursor: "pointer", textAlign: "center",
+                                  background: selectedPrintfulId === cp.id ? "#f0f7ff" : "#fff",
+                                  transition: "all 0.12s", overflow: "hidden",
+                                }}
+                              >
+                                {cp.image ? (
+                                  <img src={cp.image} alt={cp.title} style={{ width: "100%", height: 44, objectFit: "contain", borderRadius: 4 }} loading="lazy" />
+                                ) : (
+                                  <div style={{ width: "100%", height: 44, background: "#f3f3f3", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#888" }}>No img</div>
+                                )}
+                                <div style={{ fontSize: 9, fontWeight: 500, marginTop: 2, lineHeight: 1.2, color: selectedPrintfulId === cp.id ? "#005bd3" : "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                  {cp.title.split("|")[0].trim()}
+                                </div>
+                              </div>
+                            ))}
+                            {filteredCatalog.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 12, color: "#888", fontSize: 12 }}>No products match</div>}
+                            {filteredCatalog.length > 60 && <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 6, color: "#888", fontSize: 10 }}>Showing 60 of {filteredCatalog.length} — narrow search</div>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                     <Select label="Image shape" options={imageShapeOptions} onChange={handleImageShapeChange} value={imageShape} />
                     <Checkbox label="Publish to Shopify immediately" checked={publishImmediately} onChange={setPublishImmediately} />
                     {inputMode === "describe" && (
@@ -519,6 +695,7 @@ export function ProductGenerator() {
               transition: "all 0.15s ease",
               opacity: inputMode === "winning" ? 1 : 0.55,
               cursor: inputMode === "winning" ? "default" : "pointer",
+              minWidth: 0, overflow: "hidden",
             }}
           >
             <Card>
@@ -607,12 +784,75 @@ export function ProductGenerator() {
                       <TextField
                         value={winningPrompt}
                         onChange={setWinningPrompt}
-                        label="AI-generated prompt (edit as needed)"
+                        label="AI-generated prompt (PLEASE EDIT to make your own ORIGINAL product)"
                         multiline={3}
                         autoComplete="off"
                         helpText="Generated from your image. Edit before generating."
                       />
-                      <Select label="Product type" options={productTypeOptions} onChange={handleWinningProductTypeChange} value={winningProductType} />
+                      <div>
+                        <div style={{ marginBottom: 4 }}><Text variant="bodyMd" as="label" fontWeight="semibold">Product type</Text></div>
+                        {catalogProducts.length > 0 && (
+                          <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 8, overflow: "hidden", border: "1px solid #c9cccf" }}>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("dropdown"); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: productSourceMode === "dropdown" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "dropdown" ? "#fff" : "#555", transition: "all 0.15s" }}>Quick Select</button>
+                            <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("printful"); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", borderLeft: "1px solid #c9cccf", cursor: "pointer", background: productSourceMode === "printful" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "printful" ? "#fff" : "#555", transition: "all 0.15s" }}>Printful Catalog ({catalogProducts.length})</button>
+                          </div>
+                        )}
+                        {productSourceMode === "dropdown" && (
+                          <Select label="" options={productTypeOptions} onChange={handleWinningProductTypeChange} value={winningProductType} />
+                        )}
+                        {productSourceMode === "printful" && (
+                          <div>
+                            {selectedPrintfulId && (
+                              <div style={{ padding: "6px 10px", background: "#e8f5ff", borderRadius: 6, fontSize: 12, color: "#005bd3", marginBottom: 8 }}>
+                                Selected: <strong>{selectedPrintfulTitle}</strong>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ marginLeft: 8, background: "none", border: "none", color: "#bf0711", cursor: "pointer", fontSize: 12 }}>Clear</button>
+                              </div>
+                            )}
+                            <input
+                              type="text"
+                              value={catalogSearch}
+                              onChange={(e) => setCatalogSearch(e.target.value)}
+                              placeholder="Search 468 products..."
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                width: "100%", padding: "8px 10px", border: "1px solid #c9cccf", borderRadius: 6,
+                                fontSize: 13, marginBottom: 8, outline: "none", boxSizing: "border-box",
+                              }}
+                            />
+                            <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 8, paddingBottom: 4 }}>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setCatalogCategory("All"); }} style={{ padding: "3px 8px", borderRadius: 12, border: catalogCategory === "All" ? "2px solid #005bd3" : "1px solid #c9cccf", background: catalogCategory === "All" ? "#005bd3" : "#fff", color: catalogCategory === "All" ? "#fff" : "#333", fontSize: 11, cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}>All</button>
+                              {catalogCategories.map((cat) => (
+                                <button key={cat} type="button" onClick={(e) => { e.stopPropagation(); setCatalogCategory(cat); }} style={{ padding: "3px 8px", borderRadius: 12, border: catalogCategory === cat ? "2px solid #005bd3" : "1px solid #c9cccf", background: catalogCategory === cat ? "#005bd3" : "#fff", color: catalogCategory === cat ? "#fff" : "#333", fontSize: 11, cursor: "pointer", fontWeight: 500, whiteSpace: "nowrap", flexShrink: 0 }}>{cat}</button>
+                              ))}
+                            </div>
+                            <div style={{ maxHeight: 220, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 6 }}>
+                              {filteredCatalog.slice(0, 60).map((cp) => (
+                                <div
+                                  key={cp.id}
+                                  onClick={(e) => { e.stopPropagation(); handleCatalogSelect(cp, setWinningProductType); }}
+                                  style={{
+                                    border: selectedPrintfulId === cp.id ? "2px solid #005bd3" : "1px solid #e3e5e7",
+                                    borderRadius: 6, padding: 4, cursor: "pointer", textAlign: "center",
+                                    background: selectedPrintfulId === cp.id ? "#f0f7ff" : "#fff",
+                                    transition: "all 0.12s", overflow: "hidden",
+                                  }}
+                                >
+                                  {cp.image ? (
+                                    <img src={cp.image} alt={cp.title} style={{ width: "100%", height: 44, objectFit: "contain", borderRadius: 4 }} loading="lazy" />
+                                  ) : (
+                                    <div style={{ width: "100%", height: 44, background: "#f3f3f3", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#888" }}>No img</div>
+                                  )}
+                                  <div style={{ fontSize: 9, fontWeight: 500, marginTop: 2, lineHeight: 1.2, color: selectedPrintfulId === cp.id ? "#005bd3" : "#333", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                    {cp.title.split("|")[0].trim()}
+                                  </div>
+                                </div>
+                              ))}
+                              {filteredCatalog.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 12, color: "#888", fontSize: 12 }}>No products match</div>}
+                              {filteredCatalog.length > 60 && <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 6, color: "#888", fontSize: 10 }}>Showing 60 of {filteredCatalog.length} — narrow search</div>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <Select label="Image shape" options={imageShapeOptions} onChange={handleWinningImageShapeChange} value={winningImageShape} />
                       <Checkbox label="Publish to Shopify immediately" checked={winningPublishImmediately} onChange={setWinningPublishImmediately} />
                       <InlineStack gap="300">
@@ -625,6 +865,7 @@ export function ProductGenerator() {
                             onClick={async () => {
                               setError(null);
                               setDesignImageUrl("");
+                              setRawArtworkUrl("");
                               setDesignId("");
                               setLifestyleImages([]);
                               setListingCopy(null);
@@ -652,7 +893,8 @@ export function ProductGenerator() {
                                 }
                                 const data = await response.json();
                                 setDesignId(data.designId);
-                                setDesignImageUrl(data.designImageUrl);
+                                setDesignImageUrl("");
+                                setRawArtworkUrl(data.rawArtworkUrl || "");
                                 setProviderStatus((prev) => ({
                                   ...(prev || {}),
                                   designImage: data.provider?.designImage || "unknown",
@@ -683,76 +925,111 @@ export function ProductGenerator() {
       )}
 
       {/* Tab 2: Preview & Revise */}
-      {selectedTab === 1 && designImageUrl && (
+      {selectedTab === 1 && (rawArtworkUrl || designImageUrl) && (
         <BlockStack gap="400">
+          {/* Artwork preview + revision controls */}
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center">
                 <div style={{ width: 32, height: 32, borderRadius: 8, background: "#e8f5ff", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Icon source={EditIcon} tone="info" />
                 </div>
-                <Text variant="headingMd" as="h2" fontWeight="semibold">Design Preview</Text>
+                <Text variant="headingMd" as="h2" fontWeight="semibold">
+                  {designImageUrl ? "Design Preview" : "Artwork Preview"}
+                </Text>
               </InlineStack>
 
               <InlineStack gap="500" blockAlign="start" wrap>
                 <ImagePreviewCard
-                  imageUrl={designImageUrl}
-                  label="Generated design"
+                  imageUrl={rawArtworkUrl || designImageUrl}
+                  label="Raw Artwork"
                   size="large"
-                  onOpen={() => openImageFullSize(designImageUrl)}
+                  onOpen={() => openImageFullSize(rawArtworkUrl || designImageUrl)}
                 />
-                <BlockStack gap="300" style={{ flex: 1, minWidth: 220 }}>
-                  <Text variant="headingSm" as="h3">Request a change</Text>
-                  <TextField
-                    value={amendment}
-                    onChange={setAmendment}
-                    label=""
-                    placeholder="e.g. make the shamrock darker, add a distressed texture"
-                    multiline={2}
-                    autoComplete="off"
+                {designImageUrl && (
+                  <ImagePreviewCard
+                    imageUrl={designImageUrl}
+                    label="Product Mockup"
+                    size="large"
+                    onOpen={() => openImageFullSize(designImageUrl)}
                   />
-                  <div>
-                    <button
-                      onClick={handleReviseDesign}
-                      disabled={!amendment.trim() || isWorking}
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "6px 14px",
-                        fontSize: 13,
-                        fontWeight: 500,
-                        color: (!amendment.trim() || isWorking) ? "#8c9196" : "#2c6ecb",
-                        background: (!amendment.trim() || isWorking) ? "#f6f6f7" : "#f1f8ff",
-                        border: `1px solid ${(!amendment.trim() || isWorking) ? "#e1e3e5" : "#b4d5fe"}`,
-                        borderRadius: 8,
-                        cursor: (!amendment.trim() || isWorking) ? "not-allowed" : "pointer",
-                        transition: "all 0.15s ease",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!e.currentTarget.disabled) {
-                          e.currentTarget.style.background = "#e0f0ff";
-                          e.currentTarget.style.borderColor = "#2c6ecb";
-                          e.currentTarget.style.transform = "translateY(-1px)";
-                          e.currentTarget.style.boxShadow = "0 2px 6px rgba(44,110,203,0.18)";
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = e.currentTarget.disabled ? "#f6f6f7" : "#f1f8ff";
-                        e.currentTarget.style.borderColor = e.currentTarget.disabled ? "#e1e3e5" : "#b4d5fe";
-                        e.currentTarget.style.transform = "none";
-                        e.currentTarget.style.boxShadow = "none";
-                      }}
-                    >
-                      {isGeneratingDesign ? "Revising..." : "Revise Design"}
-                    </button>
-                  </div>
-                </BlockStack>
+                )}
+                {!designImageUrl && (
+                  <BlockStack gap="300" style={{ flex: 1, minWidth: 220 }}>
+                    <Text variant="headingSm" as="h3">Request a change</Text>
+                    <TextField
+                      value={amendment}
+                      onChange={setAmendment}
+                      label=""
+                      placeholder="e.g. make the shamrock darker, add a distressed texture"
+                      multiline={2}
+                      autoComplete="off"
+                    />
+                    <div>
+                      <button
+                        onClick={handleReviseDesign}
+                        disabled={!amendment.trim() || isWorking}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "6px 14px",
+                          fontSize: 13,
+                          fontWeight: 500,
+                          color: (!amendment.trim() || isWorking) ? "#8c9196" : "#2c6ecb",
+                          background: (!amendment.trim() || isWorking) ? "#f6f6f7" : "#f1f8ff",
+                          border: `1px solid ${(!amendment.trim() || isWorking) ? "#e1e3e5" : "#b4d5fe"}`,
+                          borderRadius: 8,
+                          cursor: (!amendment.trim() || isWorking) ? "not-allowed" : "pointer",
+                          transition: "all 0.15s ease",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!e.currentTarget.disabled) {
+                            e.currentTarget.style.background = "#e0f0ff";
+                            e.currentTarget.style.borderColor = "#2c6ecb";
+                            e.currentTarget.style.transform = "translateY(-1px)";
+                            e.currentTarget.style.boxShadow = "0 2px 6px rgba(44,110,203,0.18)";
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = e.currentTarget.disabled ? "#f6f6f7" : "#f1f8ff";
+                          e.currentTarget.style.borderColor = e.currentTarget.disabled ? "#e1e3e5" : "#b4d5fe";
+                          e.currentTarget.style.transform = "none";
+                          e.currentTarget.style.boxShadow = "none";
+                        }}
+                      >
+                        {isGeneratingDesign ? "Revising..." : "Revise Artwork"}
+                      </button>
+                    </div>
+                  </BlockStack>
+                )}
               </InlineStack>
+
+              {/* Approve artwork → generate mockup */}
+              {!designImageUrl && (
+                <>
+                  <Divider />
+                  <InlineStack gap="300" blockAlign="center">
+                    <Button
+                      variant="primary"
+                      onClick={handleGenerateMockup}
+                      loading={isGeneratingMockup}
+                      disabled={isWorking}
+                      size="large"
+                    >
+                      {isGeneratingMockup ? "Generating Mockup..." : "Happy with Artwork \u2014 Generate Product Mockup"}
+                    </Button>
+                    <Button onClick={() => setSelectedTab(0)} disabled={isWorking}>
+                      Back to Describe
+                    </Button>
+                  </InlineStack>
+                </>
+              )}
             </BlockStack>
           </Card>
 
-          {/* Lifestyle config + approve */}
+          {/* Lifestyle config + approve — only show after mockup is ready */}
+          {designImageUrl && (
           <Card>
             <BlockStack gap="400">
               <Text variant="headingMd" as="h2" fontWeight="semibold">Lifestyle Image Settings</Text>
@@ -795,6 +1072,7 @@ export function ProductGenerator() {
               </InlineStack>
             </BlockStack>
           </Card>
+          )}
         </BlockStack>
       )}
 
@@ -837,21 +1115,6 @@ export function ProductGenerator() {
                     <div style={{ width: 32, height: 32, borderRadius: 8, background: "#f3f0ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🎨</div>
                     <Text variant="headingMd" as="h2" fontWeight="semibold">Isolated Artwork (Transparent PNG)</Text>
                   </InlineStack>
-                  <Button
-                    onClick={() => {
-                      const a = document.createElement("a");
-                      a.href = transparentArtworkUrl;
-                      a.download = `artwork-${designId}.png`;
-                      a.target = "_blank";
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    }}
-                    variant="primary"
-                    size="slim"
-                  >
-                    Download PNG
-                  </Button>
                 </InlineStack>
                 <div style={{
                   display: "flex",
@@ -952,6 +1215,7 @@ export function ProductGenerator() {
               setSelectedTab(0);
               setDesignId("");
               setDesignImageUrl("");
+              setRawArtworkUrl("");
               setLifestyleImages([]);
               setListingCopy(null);
               setTransparentArtworkUrl("");
@@ -963,6 +1227,66 @@ export function ProductGenerator() {
               Create Another Product
             </Button>
           </InlineStack>
+
+          {/* Downloads section */}
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack gap="200" blockAlign="center">
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: "#f3f0ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📥</div>
+                <Text variant="headingMd" as="h2" fontWeight="semibold">Download Files</Text>
+              </InlineStack>
+              <InlineStack gap="300" wrap>
+                {(transparentArtworkUrl || rawArtworkUrl) && (
+                  <Button
+                    onClick={() => {
+                      const url = transparentArtworkUrl || rawArtworkUrl;
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `artwork-${designId}.png`;
+                      a.target = "_blank";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }}
+                    variant="primary"
+                  >
+                    Download Artwork PNG
+                  </Button>
+                )}
+                {designImageUrl && (
+                  <Button
+                    onClick={() => {
+                      const a = document.createElement("a");
+                      a.href = designImageUrl;
+                      a.download = `mockup-${designId}.png`;
+                      a.target = "_blank";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }}
+                  >
+                    Download Product Mockup
+                  </Button>
+                )}
+                {lifestyleImages.map((url, i) => (
+                  <Button
+                    key={`dl-${i}`}
+                    onClick={() => {
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `lifestyle-${designId}-${i + 1}.png`;
+                      a.target = "_blank";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }}
+                  >
+                    Download Lifestyle {i + 1}
+                  </Button>
+                ))}
+              </InlineStack>
+            </BlockStack>
+          </Card>
         </BlockStack>
       )}
 
