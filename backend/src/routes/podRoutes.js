@@ -84,6 +84,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const allMembers = memberRepository.list();
     const allDesigns = designRepository.listByShop(shopSession.shopDomain);
     const published = allDesigns.filter((item) => item.status === "published").length;
+    const designCountsByMember = designRepository.countByMember(shopSession.shopDomain);
 
     return res.json({
       visitors: analyticsService.getSummary(),
@@ -92,7 +93,10 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         designs: allDesigns.length,
         publishedDesigns: published,
       },
-      recentMembers: allMembers.slice(0, 8).map((item) => memberAuthService.sanitizeMember(item)),
+      recentMembers: allMembers.slice(0, 8).map((item) => ({
+        ...memberAuthService.sanitizeMember(item),
+        designCount: designCountsByMember[item.id] || 0,
+      })),
     });
   });
 
@@ -318,6 +322,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         publishImmediately,
         artworkPrompt,
         designImageUrl: rawArtworkUrl,
+        createdBy: session.subject || session.memberId || null,
       });
       design.rawArtworkUrl = rawArtworkUrl;
 

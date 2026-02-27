@@ -846,13 +846,14 @@ class PodPipelineService {
     }
   }
 
-  createDesignRecord({ shopDomain, prompt, productType, publishImmediately, artworkPrompt, designImageUrl }) {
+  createDesignRecord({ shopDomain, prompt, productType, publishImmediately, artworkPrompt, designImageUrl, createdBy }) {
     const now = Date.now();
     return {
       id: randomUUID(),
       shopDomain,
       prompt,
       productType,
+      createdBy: createdBy || null,
       publishImmediately,
       status: "preview_ready",
       artworkPrompt,

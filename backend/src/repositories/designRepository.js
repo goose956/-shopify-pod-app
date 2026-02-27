@@ -34,6 +34,17 @@ class DesignRepository {
     return db.designs.filter((item) => item.shopDomain === shopDomain);
   }
 
+  countByMember(shopDomain) {
+    const db = this.store.read();
+    const counts = {};
+    for (const d of db.designs) {
+      if (d.shopDomain === shopDomain && d.createdBy) {
+        counts[d.createdBy] = (counts[d.createdBy] || 0) + 1;
+      }
+    }
+    return counts;
+  }
+
   delete(designId) {
     const db = this.store.read();
     const index = db.designs.findIndex((item) => item.id === designId);

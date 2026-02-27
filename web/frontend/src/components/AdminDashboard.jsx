@@ -12,17 +12,14 @@ import {
   Icon,
   InlineGrid,
   InlineStack,
-  Link,
   Spinner,
   Text,
   TextField,
-  Thumbnail,
 } from "@shopify/polaris";
 import {
   ChartDonutIcon,
   PersonIcon,
   SettingsIcon,
-  ImageIcon,
   RefreshIcon,
 } from "@shopify/polaris-icons";
 import { getSessionToken } from "../utils/sessionToken";
@@ -83,13 +80,6 @@ export function AdminDashboard() {
   const [openAiTestMessage, setOpenAiTestMessage] = useState("");
   const [openAiTestTone, setOpenAiTestTone] = useState("warning");
 
-  const [designs, setDesigns] = useState([]);
-  const [isLoadingDesigns, setIsLoadingDesigns] = useState(false);
-  const [designsError, setDesignsError] = useState(null);
-  const [expandedDesigns, setExpandedDesigns] = useState({});
-  const [assetsByDesign, setAssetsByDesign] = useState({});
-  const [assetErrors, setAssetErrors] = useState({});
-  const [loadingAssets, setLoadingAssets] = useState({});
   const [analytics, setAnalytics] = useState(null);
   const [isLoadingAnalytics, setIsLoadingAnalytics] = useState(false);
   const [analyticsError, setAnalyticsError] = useState("");
@@ -251,73 +241,7 @@ export function AdminDashboard() {
     }
   }, [memberEmail, memberName, memberPassword, loadAnalytics]);
 
-  // ── Designs ────────────────────────────────────────────────────────────────
-  const loadDesigns = useCallback(async () => {
-    setDesignsError(null);
-    setIsLoadingDesigns(true);
-    try {
-      const sessionToken = await getSessionToken();
-      const response = await fetch("/api/designs", {
-        headers: { "X-Shopify-Session-Token": sessionToken },
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to load designs");
-      }
-      const data = await response.json();
-      setDesigns(Array.isArray(data.designs) ? data.designs : []);
-    } catch (err) {
-      setDesignsError(err.message || "Failed to load designs");
-    } finally {
-      setIsLoadingDesigns(false);
-    }
-  }, []);
-
-  useEffect(() => { loadDesigns(); }, [loadDesigns]);
-
-  const loadAssetsForDesign = useCallback(async (designId) => {
-    setAssetErrors((prev) => ({ ...prev, [designId]: "" }));
-    setLoadingAssets((prev) => ({ ...prev, [designId]: true }));
-    try {
-      const sessionToken = await getSessionToken();
-      const response = await fetch(`/api/designs/${designId}/assets`, {
-        headers: { "X-Shopify-Session-Token": sessionToken },
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "Failed to load assets");
-      }
-      const data = await response.json();
-      setAssetsByDesign((prev) => ({ ...prev, [designId]: Array.isArray(data.assets) ? data.assets : [] }));
-    } catch (err) {
-      setAssetErrors((prev) => ({ ...prev, [designId]: err.message || "Failed to load assets" }));
-    } finally {
-      setLoadingAssets((prev) => ({ ...prev, [designId]: false }));
-    }
-  }, []);
-
-  const toggleAssets = useCallback(
-    async (designId) => {
-      if (expandedDesigns[designId]) {
-        setExpandedDesigns((prev) => ({ ...prev, [designId]: false }));
-        return;
-      }
-      setExpandedDesigns((prev) => ({ ...prev, [designId]: true }));
-      if (!assetsByDesign[designId]) await loadAssetsForDesign(designId);
-    },
-    [expandedDesigns, assetsByDesign, loadAssetsForDesign]
-  );
-
   // ── Helpers ────────────────────────────────────────────────────────────────
-  function statusBadge(status) {
-    const map = {
-      preview_ready: { tone: "info", label: "Preview Ready" },
-      published: { tone: "success", label: "Published" },
-      draft: { tone: "warning", label: "Draft" },
-    };
-    const entry = map[status] || { tone: "base", label: status || "Unknown" };
-    return <Badge tone={entry.tone}>{entry.label}</Badge>;
-  }
 
   function formatDate(ts) {
     if (!ts) return "—";
@@ -409,7 +333,12 @@ export function AdminDashboard() {
                           <Text variant="bodyMd" fontWeight="medium" as="p">{member.fullName || "—"}</Text>
                           <Text variant="bodySm" tone="subdued" as="p">{member.email}</Text>
                         </BlockStack>
-                        <Text variant="bodySm" tone="subdued" as="p">{formatDate(member.createdAt)}</Text>
+                        <InlineStack gap="300" blockAlign="center">
+                          <Badge tone={member.designCount > 0 ? "success" : "base"}>
+                            {member.designCount} {member.designCount === 1 ? "design" : "designs"}
+                          </Badge>
+                          <Text variant="bodySm" tone="subdued" as="p">{formatDate(member.createdAt)}</Text>
+                        </InlineStack>
                       </InlineStack>
                     </Box>
                   ))}
@@ -476,87 +405,6 @@ export function AdminDashboard() {
             {settingsMessage && <Text tone="success"  as="span">{settingsMessage}</Text>}
             <Button variant="primary" onClick={saveSettings} loading={isSavingSettings}>Save Configuration</Button>
           </InlineStack>
-        </BlockStack>
-      </Card>
-
-      {/* ── Design Library ─────────────────────────────────────────────────── */}
-      <Card>
-        <BlockStack gap="400">
-          <SectionHeader
-            icon={ImageIcon}
-            title="Design Library"
-            action={
-              <Button icon={RefreshIcon} onClick={loadDesigns} loading={isLoadingDesigns} size="slim" variant="plain">
-                Refresh
-              </Button>
-            }
-          />
-          {designsError && <Banner tone="critical" title="Could not load designs"><p>{designsError}</p></Banner>}
-          {isLoadingDesigns && designs.length === 0 && <InlineStack align="center"><Spinner size="small" /></InlineStack>}
-          {!isLoadingDesigns && designs.length === 0 && !designsError && (
-            <Box background="bg-surface-secondary" borderRadius="300" padding="600" borderWidth="025" borderColor="border">
-              <Text as="p" alignment="center" tone="subdued">
-                No designs yet. Head to the Generator tab to create your first design.
-              </Text>
-            </Box>
-          )}
-          {designs.length > 0 && (
-            <BlockStack gap="200">
-              {designs.map((design) => (
-                <Box key={design.id} background="bg-surface-secondary" borderRadius="300" padding="400" borderWidth="025" borderColor="border">
-                  <BlockStack gap="300">
-                    <InlineStack align="space-between" blockAlign="start" gap="400">
-                      <InlineStack gap="300" blockAlign="start">
-                        {design.previewImageUrl && (
-                          <Thumbnail source={design.previewImageUrl} alt={design.prompt || "Design preview"} size="medium" />
-                        )}
-                        <BlockStack gap="100">
-                          <Text variant="bodyMd" fontWeight="semibold" as="p">
-                            {design.prompt ? (design.prompt.length > 80 ? `${design.prompt.slice(0, 80)}…` : design.prompt) : "Untitled design"}
-                          </Text>
-                          <InlineStack gap="200" blockAlign="center">
-                            {statusBadge(design.status)}
-                            <Badge>{design.productType || "unknown"}</Badge>
-                          </InlineStack>
-                          <Text variant="bodySm" tone="subdued" as="p">Updated {formatDate(design.updatedAt)}</Text>
-                        </BlockStack>
-                      </InlineStack>
-                      <InlineStack gap="200" blockAlign="center">
-                        {design.adminUrl && (
-                          <Button size="slim" url={design.adminUrl} target="_blank" variant="plain">Shopify Admin</Button>
-                        )}
-                        <Button size="slim" onClick={() => toggleAssets(design.id)} loading={Boolean(loadingAssets[design.id])} variant="plain">
-                          {expandedDesigns[design.id] ? "Hide Assets" : "View Assets"}
-                        </Button>
-                      </InlineStack>
-                    </InlineStack>
-                    {expandedDesigns[design.id] && (
-                      <>
-                        {assetErrors[design.id] && <Banner tone="critical"><p>{assetErrors[design.id]}</p></Banner>}
-                        {!assetErrors[design.id] && (
-                          <Box paddingInlineStart="400">
-                            {(assetsByDesign[design.id] || []).length === 0 ? (
-                              <Text tone="subdued" as="p">No assets stored yet.</Text>
-                            ) : (
-                              <BlockStack gap="100">
-                                {(assetsByDesign[design.id] || []).map((asset) => (
-                                  <InlineStack key={asset.id} gap="200" blockAlign="center">
-                                    <Badge>{asset.type}</Badge>
-                                    <Badge tone="base">{asset.role}</Badge>
-                                    <Link url={asset.url} target="_blank">Open asset</Link>
-                                  </InlineStack>
-                                ))}
-                              </BlockStack>
-                            )}
-                          </Box>
-                        )}
-                      </>
-                    )}
-                  </BlockStack>
-                </Box>
-              ))}
-            </BlockStack>
-          )}
         </BlockStack>
       </Card>
 
