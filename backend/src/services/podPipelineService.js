@@ -609,7 +609,7 @@ class PodPipelineService {
     }
   }
 
-  async generateLifestyleImages({ productType, baseDesignImageUrl, designConcept, keiAiApiKey, kieEditUrl, openAiApiKey, lifestylePrompts, maxWaitMs, pollIntervalMs }) {
+  async generateLifestyleImages({ productType, baseDesignImageUrl, designConcept, keiAiApiKey, kieEditUrl, openAiApiKey, stabilityApiKey, lifestylePrompts, maxWaitMs, pollIntervalMs }) {
     // Prompts describe only the SCENE — the actual design image is sent as a
     // reference image to the edit API so the product stays visually consistent.
     const defaultPrompts = [
@@ -619,7 +619,8 @@ class PodPipelineService {
     ];
 
     const hasReferenceImage = Boolean(baseDesignImageUrl);
-    console.log(`[Lifestyle] Starting generation: productType=${productType}, hasReferenceImage=${hasReferenceImage}, referenceIsDataUri=${String(baseDesignImageUrl || "").startsWith("data:")}`);
+    const hasStabilityKey = this.isUsableApiKey(stabilityApiKey) && String(stabilityApiKey).length > 10;
+    console.log(`[Lifestyle] Starting generation: productType=${productType}, hasReferenceImage=${hasReferenceImage}, hasStabilityKey=${hasStabilityKey}, referenceIsDataUri=${String(baseDesignImageUrl || "").startsWith("data:")}`);
 
     const prompts = Array.isArray(lifestylePrompts)
       ? lifestylePrompts.map((item) => String(item || "").trim()).filter(Boolean)
@@ -627,6 +628,64 @@ class PodPipelineService {
 
     const promptsToUse = prompts.length > 0 ? prompts : defaultPrompts;
 
+    // ── Try Stability AI first (much cheaper: ~$0.003-$0.006 per image) ──
+    if (hasStabilityKey && hasReferenceImage && this.stabilityImageService) {
+      try {
+        console.log("[Lifestyle] Trying Stability AI for product images (cost-optimised)...");
+        const stabilityResult = await this.stabilityImageService.generateProductImages({
+          stabilityApiKey: stabilityApiKey,
+          productImageRef: baseDesignImageUrl,
+          productType,
+          scenePrompts: promptsToUse,
+          strength: 0.55,
+        });
+
+        if (stabilityResult.successCount === stabilityResult.totalCount) {
+          console.log(`[Lifestyle] Stability AI succeeded for all ${stabilityResult.totalCount} images`);
+          return {
+            imageUrls: stabilityResult.imageUrls,
+            provider: "stability",
+            providerMessage: stabilityResult.providerMessage,
+          };
+        }
+
+        // Partial success — fill gaps with OpenAI
+        if (stabilityResult.successCount > 0) {
+          console.log(`[Lifestyle] Stability AI partial: ${stabilityResult.successCount}/${stabilityResult.totalCount}. Filling gaps with OpenAI...`);
+          const mixed = [...stabilityResult.imageUrls];
+          for (let i = 0; i < mixed.length; i++) {
+            if (!mixed[i] && this.isUsableApiKey(openAiApiKey)) {
+              let fallbackUrl = null;
+              if (baseDesignImageUrl) {
+                fallbackUrl = await this.generateOpenAiImageEdit({
+                  prompt: promptsToUse[i],
+                  referenceImageUrl: baseDesignImageUrl,
+                  openAiApiKey,
+                });
+              }
+              if (!fallbackUrl) {
+                fallbackUrl = await this.generateOpenAiImage({
+                  prompt: promptsToUse[i],
+                  openAiApiKey,
+                });
+              }
+              mixed[i] = fallbackUrl || `https://via.placeholder.com/1024?text=${encodeURIComponent(promptsToUse[i].slice(0, 50))}`;
+            }
+          }
+          return {
+            imageUrls: mixed.map(u => u || `https://via.placeholder.com/1024?text=product`),
+            provider: "stability-openai-mixed",
+            providerMessage: `${stabilityResult.successCount} images via Stability AI, remainder via OpenAI fallback.`,
+          };
+        }
+
+        console.warn("[Lifestyle] Stability AI failed for all images, falling through to OpenAI...");
+      } catch (stabErr) {
+        console.warn("[Lifestyle] Stability AI error, falling through to OpenAI:", stabErr?.message);
+      }
+    }
+
+    // ── OpenAI path (original, used as fallback) ──
     if (this.isUsableApiKey(openAiApiKey)) {
       const openAiResults = [];
       let usedReferenceImageCount = 0;

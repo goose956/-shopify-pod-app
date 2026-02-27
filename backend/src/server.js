@@ -19,6 +19,7 @@ const { AnalyticsService } = require("./services/analyticsService");
 const { PodPipelineService } = require("./services/podPipelineService");
 const { AssetStorageService } = require("./services/assetStorageService");
 const { ShopifyPublishService } = require("./services/shopifyPublishService");
+const { StabilityImageService } = require("./services/stabilityImageService");
 const { PrintfulMockupService } = require("./services/printfulMockupService");
 const { createPodRouter } = require("./routes/podRoutes");
 const { createAuthRouter } = require("./routes/authRoutes");
@@ -133,6 +134,8 @@ async function createServer() {
   const memberAuthService = new MemberAuthService(memberRepository);
   const analyticsService = new AnalyticsService();
   const pipelineService = new PodPipelineService(uploadsDir);
+  const stabilityImageService = new StabilityImageService(uploadsDir);
+  pipelineService.stabilityImageService = stabilityImageService;
   const assetStorageService = new AssetStorageService(assetRepository);
   const publishService = new ShopifyPublishService(config, settingsRepository);
   const printfulMockupService = new PrintfulMockupService(uploadsDir);

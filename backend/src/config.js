@@ -19,6 +19,7 @@ function getConfig() {
       openAiApiKey: process.env.OPENAI_API_KEY || "",
       printfulApiKey: process.env.PRINTFUL_API_KEY || "",
       kieApiKey: process.env.KIE_API_KEY || "",
+      stabilityApiKey: process.env.STABILITY_API_KEY || "",
     },
     storage: {
       databaseUrl: process.env.DATABASE_URL || "",

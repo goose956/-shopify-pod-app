@@ -56,6 +56,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       openAiApiKey: effectiveKey(s.openAiApiKey, envDefaults.openAiApiKey),
       printfulApiKey: effectiveKey(s.printfulApiKey, envDefaults.printfulApiKey),
       keiAiApiKey: effectiveKey(s.keiAiApiKey, envDefaults.kieApiKey),
+      stabilityApiKey: effectiveKey(s.stabilityApiKey, envDefaults.stabilityApiKey),
     };
   }
 
@@ -712,7 +713,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       const settings = getEffectiveSettings(session.shopDomain);
       const hasOpenAi = Boolean(settings?.openAiApiKey && settings.openAiApiKey.length > 5);
       const hasKie = Boolean(settings?.keiAiApiKey && settings.keiAiApiKey.length > 5);
-      console.log(`[Finalize] API keys — OpenAI: ${hasOpenAi}, KIE: ${hasKie}`);
+      const hasStability = Boolean(settings?.stabilityApiKey && settings.stabilityApiKey.length > 10);
+      console.log(`[Finalize] API keys — OpenAI: ${hasOpenAi}, KIE: ${hasKie}, Stability: ${hasStability}`);
 
       // ── Step 1: Generate product images ─────────────────────────────────
       let lifestyleResult;
@@ -725,6 +727,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           keiAiApiKey: settings?.keiAiApiKey || "",
           kieEditUrl: settings?.kieEditUrl,
           openAiApiKey: settings?.openAiApiKey || "",
+          stabilityApiKey: settings?.stabilityApiKey || "",
           lifestylePrompts: requestedLifestylePrompts,
           maxWaitMs: 30000,
           pollIntervalMs: 2500,
