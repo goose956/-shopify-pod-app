@@ -595,6 +595,16 @@ export function ProductGenerator() {
 
       {/* Tab 1: Describe */}
       {selectedTab === 0 && (
+        <BlockStack gap="400">
+        <Card>
+          <BlockStack gap="200">
+            <Text variant="headingMd" as="h2" fontWeight="semibold">Step 1: Describe Your Design</Text>
+            <Text variant="bodyMd" tone="subdued" as="p">
+              Start by describing what you want your product to look like, or upload a reference image for the AI to analyse.
+              Choose your product type (t-shirt, mug, poster, etc.) and click Generate to create your initial artwork.
+            </Text>
+          </BlockStack>
+        </Card>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           {/* Left: Manual prompt */}
           <div
@@ -956,11 +966,21 @@ export function ProductGenerator() {
               </Card>
             </div>
           </div>
+        </BlockStack>
       )}
 
       {/* Tab 2: Preview & Revise */}
       {selectedTab === 1 && (rawArtworkUrl || designImageUrl) && (
         <BlockStack gap="400">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="headingMd" as="h2" fontWeight="semibold">Step 2: Preview & Refine</Text>
+              <Text variant="bodyMd" tone="subdued" as="p">
+                Review your AI-generated artwork below. You can request changes by typing a revision (e.g. "make the colours brighter" or "add a border"),
+                generate a product mockup to see how it looks on the actual product, or approve it and move to the next step.
+              </Text>
+            </BlockStack>
+          </Card>
           {/* Artwork preview + revision controls */}
           <Card>
             <BlockStack gap="400">
@@ -1116,6 +1136,16 @@ export function ProductGenerator() {
       {selectedTab === 2 && hasLifestyle && (
         <BlockStack gap="400">
           <Card>
+            <BlockStack gap="200">
+              <Text variant="headingMd" as="h2" fontWeight="semibold">Step 3: Product Images & Listing Copy</Text>
+              <Text variant="bodyMd" tone="subdued" as="p">
+                Here are the AI-generated product images and listing copy for your Shopify store. These images show your design on the product in
+                realistic lifestyle scenes. The listing copy includes a title, description, and tags — all auto-generated. Click any image to view full size,
+                or proceed to the Results tab to see your published product.
+              </Text>
+            </BlockStack>
+          </Card>
+          <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center" align="space-between">
                 <Text variant="headingMd" as="h2" fontWeight="semibold">Product Images</Text>
@@ -1219,6 +1249,15 @@ export function ProductGenerator() {
       {/* Tab 4: Published */}
       {selectedTab === 3 && hasFinalized && (
         <BlockStack gap="400">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="headingMd" as="h2" fontWeight="semibold">Step 4: Results</Text>
+              <Text variant="bodyMd" tone="subdued" as="p">
+                Your product has been created on your Shopify store. If it was published as a draft, you can find it in your
+                Shopify admin under Products and set it to Active when you're ready. You can also start a new design from the Describe tab.
+              </Text>
+            </BlockStack>
+          </Card>
           <Card>
             <BlockStack gap="400">
               {hasPublished ? (

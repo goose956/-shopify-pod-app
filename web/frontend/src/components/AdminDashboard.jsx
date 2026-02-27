@@ -252,6 +252,18 @@ export function AdminDashboard() {
   return (
     <BlockStack gap="600">
 
+      {/* ── Page Description ──────────────────────────────────────────────── */}
+      <Card>
+        <BlockStack gap="200">
+          <Text variant="headingMd" as="h2" fontWeight="semibold">Admin Dashboard</Text>
+          <Text variant="bodyMd" tone="subdued" as="p">
+            Configure your API keys, view analytics, and manage team members. You'll need at least one AI provider key
+            (OpenAI or KIE.ai) to generate designs. The Printful key enables the product catalog for realistic mockups.
+            Use the Test buttons to verify your keys are working correctly.
+          </Text>
+        </BlockStack>
+      </Card>
+
       {/* ── Analytics ──────────────────────────────────────────────────────── */}
       <Card>
         <BlockStack gap="400">

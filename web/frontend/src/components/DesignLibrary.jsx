@@ -232,6 +232,16 @@ export function DesignLibrary() {
 
   return (
     <BlockStack gap="400">
+      <Card>
+        <BlockStack gap="200">
+          <Text variant="headingMd" as="h2" fontWeight="semibold">Design Library</Text>
+          <Text variant="bodyMd" tone="subdued" as="p">
+            Browse all your previously generated designs in one place. You can search by prompt, product type, or status.
+            Click on any design to download the artwork, or delete designs you no longer need. Designs that have been published
+            to your Shopify store are marked with a green "Published" badge.
+          </Text>
+        </BlockStack>
+      </Card>
       {error && (
         <Banner tone="critical" title="Error" onDismiss={() => setError(null)}>
           <p>{error}</p>
