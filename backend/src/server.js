@@ -74,6 +74,28 @@ async function createServer() {
     res.json({ ok: true, dbReady });
   });
 
+  // ── Body parsing (skip /webhooks — they need raw body for HMAC) ────────────
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/webhooks")) return next();
+    express.json({ limit: "20mb" })(req, res, next);
+  });
+
+  // ── Serve uploaded images as static files ─────────────────────────────────
+  app.use("/uploads", express.static(uploadsDir, { maxAge: "7d" }));
+
+  // ── Serve built frontend (no DB needed – register before listen) ──────────
+  const frontendDist = path.join(__dirname, "..", "..", "web", "frontend", "dist");
+  app.use(express.static(frontendDist));
+  // SPA catch-all: serve index.html for any non-API GET request
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health") {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, "index.html"), (err) => {
+      if (err) next();
+    });
+  });
+
   // ── Start listening IMMEDIATELY so Railway health-checks pass ─────────
   const port = Number(process.env.PORT || 3000);
   const server = app.listen(port, () => {
@@ -81,15 +103,19 @@ async function createServer() {
   });
 
   // ── Data store (PostgreSQL in production, JSON file in dev) ───────────────
-  // Created early so repositories are available for webhook handlers.
   let store;
-  if (config.storage.databaseUrl) {
-    console.log("[Storage] Using PostgreSQL");
-    store = new PostgresStore(config.storage.databaseUrl);
-    await store.waitForReady();
-  } else {
-    console.log("[Storage] Using JSON file:", config.storage.dataFilePath);
-    store = new JsonStore(config.storage.dataFilePath);
+  try {
+    if (config.storage.databaseUrl) {
+      console.log("[Storage] Using PostgreSQL");
+      store = new PostgresStore(config.storage.databaseUrl);
+      await store.waitForReady();
+    } else {
+      console.log("[Storage] Using JSON file:", config.storage.dataFilePath);
+      store = new JsonStore(config.storage.dataFilePath);
+    }
+  } catch (err) {
+    console.error("[FATAL] Database initialisation failed:", err);
+    process.exit(1);
   }
   dbReady = true;
   console.log("[Init] DB ready, finishing route setup…");
@@ -100,14 +126,8 @@ async function createServer() {
   const settingsRepository = new SettingsRepository(store);
   const memberRepository = new MemberRepository(store);
 
-  // ── GDPR + uninstall webhooks (mounted BEFORE express.json so raw body is available) ─
+  // ── GDPR + uninstall webhooks ─────────────────────────────────────────────
   app.use("/webhooks", createWebhookRouter({ config, settingsRepository, designRepository, memberRepository }));
-
-  // ── Body parsing ──────────────────────────────────────────────────────────
-  app.use(express.json({ limit: "20mb" }));
-
-  // Serve uploaded images as static files
-  app.use("/uploads", express.static(uploadsDir, { maxAge: "7d" }));
 
   const authService = new AuthService(config);
   const memberAuthService = new MemberAuthService(memberRepository);
@@ -173,17 +193,7 @@ async function createServer() {
     })
   );
 
-  // ── Serve built frontend in production ────────────────────────────────────
-  const frontendDist = path.join(__dirname, "..", "..", "web", "frontend", "dist");
-  app.use(express.static(frontendDist, { index: false }));
-  app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health") {
-      return next();
-    }
-    res.sendFile(path.join(frontendDist, "index.html"), (err) => {
-      if (err) next();
-    });
-  });
+  console.log("[Init] All routes registered — app fully ready.");
 
   // ── Global error handler ──────────────────────────────────────────────────
   app.use((err, _req, res, _next) => {
