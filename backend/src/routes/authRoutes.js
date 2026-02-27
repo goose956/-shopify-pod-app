@@ -15,6 +15,11 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       shop,
       createdAt: Date.now(),
     });
+    // Flush nonce to Postgres so it survives a restart between
+    // redirect → callback (fire-and-forget is fine for nonces)
+    settingsRepository.flush().catch((e) =>
+      console.error("[OAuth] Nonce flush error:", e.message)
+    );
   }
 
   function _consumeNonce(nonce) {
@@ -123,6 +128,16 @@ function createAuthRouter({ config, authService, settingsRepository }) {
         shopifyScopes: grantedScopes,
         installedAt: Date.now(),
       });
+
+      // ── CRITICAL: flush to PostgreSQL BEFORE redirecting ──
+      try {
+        await settingsRepository.flush();
+        console.log(`[OAuth] Token flushed to PostgreSQL for ${shop}`);
+      } catch (flushErr) {
+        console.error(`[OAuth] FLUSH FAILED for ${shop}:`, flushErr.message);
+        // Even if flush fails, the in-memory cache has the token,
+        // so the app will work until the next restart. Log loudly.
+      }
 
       console.log(`[OAuth] App installed for shop: ${shop}, token prefix: ${accessToken.slice(0, 8)}..., scopes: ${grantedScopes}`);
 

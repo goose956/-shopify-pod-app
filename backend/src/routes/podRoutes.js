@@ -138,6 +138,14 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       installedAt: Date.now(),
     });
 
+    // Flush to Postgres so it survives restarts
+    try {
+      await settingsRepository.flush();
+      console.log(`[set-token] Token flushed to PostgreSQL for ${targetShop}`);
+    } catch (flushErr) {
+      console.error(`[set-token] FLUSH FAILED for ${targetShop}:`, flushErr.message);
+    }
+
     // Verify
     const saved = settingsRepository.findByShop(targetShop);
     res.json({

@@ -119,6 +119,15 @@ class PostgresStore {
     );
   }
 
+  /**
+   * Explicitly flush the in-memory cache to PostgreSQL and AWAIT the result.
+   * Use this whenever you must guarantee the data is persisted before
+   * continuing (e.g. after storing an OAuth token).
+   */
+  async flush() {
+    await this._persist();
+  }
+
   /** Graceful shutdown. */
   async close() {
     await this.pool.end();

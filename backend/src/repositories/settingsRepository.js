@@ -49,6 +49,16 @@ class SettingsRepository {
     this.store.write(db);
     return before - db.settings.length;
   }
+
+  /**
+   * Explicitly flush cached data to the persistent backend (PostgreSQL).
+   * Returns a resolved promise for JsonStore (no-op).
+   */
+  async flush() {
+    if (typeof this.store.flush === "function") {
+      await this.store.flush();
+    }
+  }
 }
 
 module.exports = {
