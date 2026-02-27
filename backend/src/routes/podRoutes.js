@@ -783,41 +783,63 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         });
       }
 
-      const publishedProduct = await publishService.publish({
-        shopDomain: session.shopDomain,
-        title: listingCopy.title,
-        descriptionHtml: listingCopy.descriptionHtml,
-        tags: listingCopy.tags,
-        imageUrls: [design.previewImageUrl, ...lifestyleImages],
-        publishImmediately,
-      });
+      // Attempt to publish to Shopify — non-fatal if it fails (e.g. no OAuth token yet)
+      let publishedProduct = null;
+      let publishError = null;
+      try {
+        publishedProduct = await publishService.publish({
+          shopDomain: session.shopDomain,
+          title: listingCopy.title,
+          descriptionHtml: listingCopy.descriptionHtml,
+          tags: listingCopy.tags,
+          imageUrls: [design.previewImageUrl, ...lifestyleImages],
+          publishImmediately,
+        });
+      } catch (pubErr) {
+        console.error("[Finalize] Shopify publish failed (non-fatal):", pubErr?.message);
+        publishError = pubErr?.message || "Shopify publish failed";
+      }
 
-      designRepository.update(designId, {
-        status: "published",
-        shopifyProductId: publishedProduct.productId,
-        adminUrl: publishedProduct.adminUrl,
-        updatedAt: Date.now(),
-        finalizedAt: Date.now(),
-      });
+      if (publishedProduct) {
+        designRepository.update(designId, {
+          status: "published",
+          shopifyProductId: publishedProduct.productId,
+          adminUrl: publishedProduct.adminUrl,
+          updatedAt: Date.now(),
+          finalizedAt: Date.now(),
+        });
 
-      productRepository.upsertByDesign(designId, {
-        designId,
-        shopDomain: session.shopDomain,
-        productId: publishedProduct.productId,
-        adminUrl: publishedProduct.adminUrl,
-        publishImmediately,
-        updatedAt: Date.now(),
-      });
+        productRepository.upsertByDesign(designId, {
+          designId,
+          shopDomain: session.shopDomain,
+          productId: publishedProduct.productId,
+          adminUrl: publishedProduct.adminUrl,
+          publishImmediately,
+          updatedAt: Date.now(),
+        });
+      } else {
+        designRepository.update(designId, {
+          status: "finalized",
+          updatedAt: Date.now(),
+          finalizedAt: Date.now(),
+        });
+      }
+
+      const providerMessages = [lifestyleResult.providerMessage, listingCopyResult.providerMessage];
+      if (publishError) {
+        providerMessages.push(`Shopify publish skipped: ${publishError}. You can publish later once OAuth is configured.`);
+      }
 
       return res.json({
-        productId: publishedProduct.productId,
-        adminUrl: publishedProduct.adminUrl,
+        productId: publishedProduct?.productId || null,
+        adminUrl: publishedProduct?.adminUrl || null,
         lifestyleImages,
         transparentArtworkUrl,
+        publishError: publishError || null,
         provider: {
           lifestyleImages: lifestyleResult.provider,
           listingCopy: listingCopyResult.provider,
-          message: [lifestyleResult.providerMessage, listingCopyResult.providerMessage].filter(Boolean).join(" | "),
+          message: providerMessages.filter(Boolean).join(" | "),
         },
         listingCopy: {
           title: listingCopy.title,

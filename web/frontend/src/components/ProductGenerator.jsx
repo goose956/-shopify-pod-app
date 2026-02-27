@@ -268,22 +268,23 @@ export function ProductGenerator() {
   const hasDesign = Boolean(designId && (rawArtworkUrl || designImageUrl));
   const hasLifestyle = lifestyleImages.length > 0;
   const hasPublished = Boolean(finalProduct?.adminUrl);
+  const hasFinalized = Boolean(finalProduct);
 
   const workflowSteps = [
     { id: "describe", label: "Describe", icon: "\u270F\uFE0F", done: hasDesign, disabled: false },
     { id: "preview", label: "Preview", icon: "\uD83D\uDDBC\uFE0F", done: hasLifestyle, disabled: !hasDesign },
-    { id: "lifestyle", label: "Lifestyle", icon: "\uD83D\uDCF8", done: hasPublished, disabled: !hasLifestyle },
-    { id: "published", label: "Published", icon: "\u2705", done: false, disabled: !hasPublished },
+    { id: "lifestyle", label: "Lifestyle", icon: "\uD83D\uDCF8", done: hasFinalized, disabled: !hasLifestyle },
+    { id: "published", label: hasPublished ? "Published" : "Results", icon: hasPublished ? "\u2705" : "\uD83D\uDCCB", done: false, disabled: !hasFinalized },
   ];
 
   // Polaris Tabs data kept for reference
-  const tabDisabled = [false, !hasDesign, !hasLifestyle, !hasPublished, false];
+  const tabDisabled = [false, !hasDesign, !hasLifestyle, !hasFinalized, false];
 
   const handleTabChange = useCallback((index) => {
     if (!tabDisabled[index]) {
       setSelectedTab(index);
     }
-  }, [hasDesign, hasLifestyle, hasPublished]);
+  }, [hasDesign, hasLifestyle, hasFinalized]);
 
   const handleReferenceImageSelect = useCallback((e) => {
     const file = e.target.files?.[0];
@@ -454,7 +455,7 @@ export function ProductGenerator() {
         listingCopy: data.provider?.listingCopy || "unknown",
         message: data.provider?.message || prev?.message || "",
       }));
-      setFinalProduct({ adminUrl: data.adminUrl, productId: data.productId });
+      setFinalProduct({ adminUrl: data.adminUrl, productId: data.productId, publishError: data.publishError || null });
       // Auto-advance to Lifestyle tab
       setSelectedTab(2);
     } catch (err) {
@@ -1200,9 +1201,9 @@ export function ProductGenerator() {
           )}
 
           <InlineStack gap="300">
-            {hasPublished && (
+            {hasFinalized && (
               <Button variant="primary" onClick={() => setSelectedTab(3)}>
-                View Published Product
+                {hasPublished ? "View Published Product" : "View Results"}
               </Button>
             )}
             <Button onClick={() => setSelectedTab(1)}>
@@ -1213,26 +1214,45 @@ export function ProductGenerator() {
       )}
 
       {/* Tab 4: Published */}
-      {selectedTab === 3 && hasPublished && (
+      {selectedTab === 3 && hasFinalized && (
         <BlockStack gap="400">
           <Card>
             <BlockStack gap="400">
-              <InlineStack gap="200" blockAlign="center">
-                <div style={{ width: 32, height: 32, borderRadius: 8, background: "#f0fff4", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Icon source={ProductIcon} tone="success" />
-                </div>
-                <Text variant="headingMd" as="h2" fontWeight="semibold">Product Created</Text>
-                <Badge tone="success">Live</Badge>
-              </InlineStack>
-              <Banner tone="success">
-                <p>
-                  Your product is ready.{" "}
-                  <Link url={finalProduct.adminUrl} target="_blank">View in Shopify Admin</Link>
-                </p>
-                {finalProduct.productId && (
-                  <p>Product ID: {finalProduct.productId}</p>
-                )}
-              </Banner>
+              {hasPublished ? (
+                <>
+                  <InlineStack gap="200" blockAlign="center">
+                    <div style={{ width: 32, height: 32, borderRadius: 8, background: "#f0fff4", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Icon source={ProductIcon} tone="success" />
+                    </div>
+                    <Text variant="headingMd" as="h2" fontWeight="semibold">Product Created</Text>
+                    <Badge tone="success">Live</Badge>
+                  </InlineStack>
+                  <Banner tone="success">
+                    <p>
+                      Your product is ready.{" "}
+                      <Link url={finalProduct.adminUrl} target="_blank">View in Shopify Admin</Link>
+                    </p>
+                    {finalProduct.productId && (
+                      <p>Product ID: {finalProduct.productId}</p>
+                    )}
+                  </Banner>
+                </>
+              ) : (
+                <>
+                  <InlineStack gap="200" blockAlign="center">
+                    <div style={{ width: 32, height: 32, borderRadius: 8, background: "#fffbe6", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Icon source={ProductIcon} tone="warning" />
+                    </div>
+                    <Text variant="headingMd" as="h2" fontWeight="semibold">Design Finalized</Text>
+                    <Badge tone="warning">Not Published</Badge>
+                  </InlineStack>
+                  <Banner tone="warning">
+                    <p>
+                      Lifestyle images and listing copy were generated successfully, but publishing to Shopify failed: {finalProduct.publishError || "No valid Shopify access token. Complete the OAuth install flow to enable publishing."}
+                    </p>
+                  </Banner>
+                </>
+              )}
             </BlockStack>
           </Card>
 
