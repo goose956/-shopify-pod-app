@@ -118,6 +118,36 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     });
   });
 
+  // ── Manual token set (requires SETUP_SECRET) ──────────────────────────────
+  router.post("/set-shopify-token", async (req, res) => {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      return res.status(401).json({ error: "No session" });
+    }
+
+    const { shop, token } = req.body || {};
+    const targetShop = String(shop || session.shopDomain).trim();
+    const accessToken = String(token || "").trim();
+
+    if (!accessToken) {
+      return res.status(400).json({ error: "Missing 'token' in body" });
+    }
+
+    settingsRepository.upsertByShop(targetShop, {
+      shopifyAccessToken: accessToken,
+      installedAt: Date.now(),
+    });
+
+    // Verify
+    const saved = settingsRepository.findByShop(targetShop);
+    res.json({
+      ok: true,
+      shop: targetShop,
+      tokenSaved: Boolean(saved?.shopifyAccessToken),
+      tokenPrefix: saved?.shopifyAccessToken ? saved.shopifyAccessToken.slice(0, 8) + "..." : "none",
+    });
+  });
+
   router.post("/members/register", async (req, res) => {
     try {
       const member = await memberAuthService.register({

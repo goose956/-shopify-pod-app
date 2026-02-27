@@ -112,6 +112,11 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       const accessToken = tokenData.access_token;
       const grantedScopes = tokenData.scope;
 
+      if (!accessToken) {
+        console.error("[OAuth] Token exchange returned no access_token:", JSON.stringify(tokenData).slice(0, 300));
+        return res.status(502).send("Token exchange returned no access token.");
+      }
+
       // Store the access token in settings for this shop
       settingsRepository.upsertByShop(shop, {
         shopifyAccessToken: accessToken,
@@ -119,7 +124,11 @@ function createAuthRouter({ config, authService, settingsRepository }) {
         installedAt: Date.now(),
       });
 
-      console.log(`[OAuth] App installed for shop: ${shop}`);
+      console.log(`[OAuth] App installed for shop: ${shop}, token prefix: ${accessToken.slice(0, 8)}..., scopes: ${grantedScopes}`);
+
+      // Verify it was saved
+      const verify = settingsRepository.findByShop(shop);
+      console.log(`[OAuth] Verify save: shop=${shop}, tokenFound=${Boolean(verify?.shopifyAccessToken)}, tokenPrefix=${verify?.shopifyAccessToken?.slice(0,8)}...`);
 
       // Redirect into embedded app
       const host = Buffer.from(`${shop}/admin`).toString("base64url");
