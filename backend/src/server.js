@@ -68,9 +68,16 @@ async function createServer() {
     credentials: true,
   }));
 
-  // ── Health check (registered early, before DB init) ───────────────────────
+  // ── Health check (responds even while DB is still initialising) ────────
+  let dbReady = false;
   app.get("/health", (_req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, dbReady });
+  });
+
+  // ── Start listening IMMEDIATELY so Railway health-checks pass ─────────
+  const port = Number(process.env.PORT || 3000);
+  const server = app.listen(port, () => {
+    console.log(`Backend listening on port ${port} (initialising…)`);
   });
 
   // ── Data store (PostgreSQL in production, JSON file in dev) ───────────────
@@ -84,6 +91,8 @@ async function createServer() {
     console.log("[Storage] Using JSON file:", config.storage.dataFilePath);
     store = new JsonStore(config.storage.dataFilePath);
   }
+  dbReady = true;
+  console.log("[Init] DB ready, finishing route setup…");
 
   const designRepository = new DesignRepository(store);
   const assetRepository = new AssetRepository(store);
@@ -182,7 +191,7 @@ async function createServer() {
     res.status(500).json({ error: "Internal server error" });
   });
 
-  return app;
+  return { app, server };
 }
 
 module.exports = {

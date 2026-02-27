@@ -10,12 +10,7 @@ process.on("uncaughtException", (err) => {
 });
 
 (async () => {
-  const port = Number(process.env.PORT || 3000);
-  const app = await createServer();
-
-  const server = app.listen(port, () => {
-    console.log(`Backend listening on port ${port}`);
-  });
+  const { app, server } = await createServer();
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   function shutdown(signal) {
