@@ -4,6 +4,26 @@ class ShopifyPublishService {
   constructor(config, settingsRepository) {
     this.config = config;
     this.settingsRepository = settingsRepository;
+    // Base URL for converting relative /uploads/ paths to full public URLs
+    this.appBaseUrl = (process.env.SHOPIFY_HOST_NAME || process.env.APP_URL || "").replace(/\/+$/, "");
+    if (this.appBaseUrl && !this.appBaseUrl.startsWith("http")) {
+      this.appBaseUrl = `https://${this.appBaseUrl}`;
+    }
+  }
+
+  /**
+   * Convert a potentially relative URL to a full public URL that Shopify can fetch.
+   */
+  _toPublicUrl(url) {
+    if (!url) return null;
+    // Already a full URL
+    if (url.startsWith("http://") || url.startsWith("https://")) return url;
+    // Relative path like /uploads/abc.png — prepend base URL
+    if (this.appBaseUrl && url.startsWith("/")) {
+      return `${this.appBaseUrl}${url}`;
+    }
+    console.warn(`[ShopifyPublish] Cannot resolve image URL to public URL: ${url} (no APP_URL configured)`);
+    return url;
   }
 
   /**
@@ -131,15 +151,21 @@ class ShopifyPublishService {
             body_html: descriptionHtml,
             status: publishImmediately ? "active" : "draft",
             tags: Array.isArray(tags) ? tags.join(", ") : tags,
-            images: (imageUrls || []).map((src) => ({ src })),
+            images: (imageUrls || []).map((src) => ({ src: this._toPublicUrl(src) })).filter(i => i.src),
           });
           productId = `gid://shopify/Product/${restProduct.id}`;
           numericId = String(restProduct.id);
           console.log(`[ShopifyPublish] Product created via REST: ${productId}`);
         } else {
-          // ── Attach images via REST (GraphQL path — images not included) ──
+          // ── Attach images via GraphQL productCreateMedia (preferred) or REST fallback ──
           if (imageUrls && imageUrls.length > 0) {
-            await this._attachImagesREST(shopDomain, accessToken, numericId, imageUrls);
+            const publicUrls = imageUrls.map(u => this._toPublicUrl(u)).filter(Boolean);
+            console.log(`[ShopifyPublish] Attaching ${publicUrls.length} images to product ${productId}`, publicUrls);
+            const attached = await this._attachImagesGraphQL(shopDomain, accessToken, productId, publicUrls);
+            if (!attached) {
+              console.log("[ShopifyPublish] GraphQL media attach failed, trying REST fallback...");
+              await this._attachImagesREST(shopDomain, accessToken, numericId, publicUrls);
+            }
           }
         }
 
@@ -187,7 +213,44 @@ class ShopifyPublishService {
   }
 
   /**
-   * Attach images to an existing product via the REST Admin API.
+   * Attach images to a product via GraphQL productCreateMedia (works in 2025-10+).
+   * Returns true if successful, false if failed (so caller can try REST fallback).
+   */
+  async _attachImagesGraphQL(shopDomain, accessToken, productGid, imageUrls) {
+    try {
+      const media = imageUrls.map((url) => ({
+        originalSource: url,
+        mediaContentType: "IMAGE",
+        alt: "Product image",
+      }));
+
+      const payload = await this._graphql(shopDomain, accessToken,
+        `mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+          productCreateMedia(productId: $productId, media: $media) {
+            media { id status }
+            mediaUserErrors { field message code }
+          }
+        }`,
+        { productId: productGid, media }
+      );
+
+      const userErrors = payload?.data?.productCreateMedia?.mediaUserErrors || [];
+      if (userErrors.length > 0) {
+        console.warn("[ShopifyPublish] GraphQL productCreateMedia errors:", JSON.stringify(userErrors));
+        return false;
+      }
+
+      const createdMedia = payload?.data?.productCreateMedia?.media || [];
+      console.log(`[ShopifyPublish] GraphQL attached ${createdMedia.length} media to product ${productGid}`);
+      return createdMedia.length > 0;
+    } catch (err) {
+      console.warn("[ShopifyPublish] GraphQL productCreateMedia failed:", err.message);
+      return false;
+    }
+  }
+
+  /**
+   * Attach images to an existing product via the REST Admin API (fallback).
    */
   async _attachImagesREST(shopDomain, accessToken, numericProductId, imageUrls) {
     const apiVersion = this.config.shopify.apiVersion;
