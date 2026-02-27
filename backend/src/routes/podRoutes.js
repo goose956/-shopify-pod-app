@@ -91,6 +91,44 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     return session;
   }
 
+  // ── Verify token scopes against Shopify API directly ────────────────────
+  router.get("/verify-scopes", async (req, res) => {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      return res.status(401).json({ error: "No session" });
+    }
+
+    const shopSettings = settingsRepository.findByShop(session.shopDomain);
+    const token = shopSettings?.shopifyAccessToken;
+    if (!token) {
+      return res.json({ error: "No token stored", shopDomain: session.shopDomain });
+    }
+
+    try {
+      // Query Shopify's access_scopes endpoint
+      const apiVersion = config.shopify.apiVersion || "2025-10";
+      const resp = await fetch(
+        `https://${session.shopDomain}/admin/api/${apiVersion}/access_scopes.json`,
+        { headers: { "X-Shopify-Access-Token": token } }
+      );
+      const data = await resp.json();
+      const scopes = data?.access_scopes?.map(s => s.handle) || [];
+
+      res.json({
+        shopDomain: session.shopDomain,
+        tokenPrefix: token.slice(0, 8) + "...",
+        httpStatus: resp.status,
+        grantedScopes: scopes,
+        hasWriteProducts: scopes.includes("write_products"),
+        hasReadProducts: scopes.includes("read_products"),
+        configuredScopes: config.shopify.scopes,
+        raw: data,
+      });
+    } catch (err) {
+      res.json({ error: err.message, shopDomain: session.shopDomain });
+    }
+  });
+
   // ── Debug: check OAuth token status for current session ─────────────────
   router.get("/debug-auth", async (req, res) => {
     const session = await resolveSession(req);
