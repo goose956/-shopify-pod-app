@@ -1,10 +1,27 @@
 class ShopifyPublishService {
-  constructor(config) {
+  constructor(config, settingsRepository) {
     this.config = config;
+    this.settingsRepository = settingsRepository;
+  }
+
+  /**
+   * Resolve the access token for a given shop.
+   * Priority: per-shop OAuth token (from settingsRepository) > global env token > null.
+   */
+  _getAccessToken(shopDomain) {
+    // 1. Per-shop OAuth token (stored during /auth/callback)
+    if (this.settingsRepository) {
+      const shopSettings = this.settingsRepository.findByShop(shopDomain);
+      if (shopSettings?.shopifyAccessToken) {
+        return shopSettings.shopifyAccessToken;
+      }
+    }
+    // 2. Global fallback (single-tenant / dev mode)
+    return this.config.shopify.adminAccessToken || "";
   }
 
   async publish({ shopDomain, title, descriptionHtml, tags, imageUrls, publishImmediately }) {
-    const accessToken = this.config.shopify.adminAccessToken;
+    const accessToken = this._getAccessToken(shopDomain);
     const apiVersion = this.config.shopify.apiVersion;
 
     if (!accessToken) {

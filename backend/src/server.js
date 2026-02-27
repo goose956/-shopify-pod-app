@@ -48,16 +48,8 @@ async function createServer() {
     next();
   });
 
-  // ── GDPR webhooks (mounted BEFORE express.json so raw body is available) ─
-  app.use("/webhooks", createWebhookRouter({ config }));
-
-  // ── Body parsing ──────────────────────────────────────────────────────────
-  app.use(express.json({ limit: "20mb" }));
-
-  // Serve uploaded images as static files
-  app.use("/uploads", express.static(uploadsDir, { maxAge: "7d" }));
-
   // ── Data store (PostgreSQL in production, JSON file in dev) ───────────────
+  // Created early so repositories are available for webhook handlers.
   let store;
   if (config.storage.databaseUrl) {
     console.log("[Storage] Using PostgreSQL");
@@ -74,12 +66,21 @@ async function createServer() {
   const settingsRepository = new SettingsRepository(store);
   const memberRepository = new MemberRepository(store);
 
+  // ── GDPR + uninstall webhooks (mounted BEFORE express.json so raw body is available) ─
+  app.use("/webhooks", createWebhookRouter({ config, settingsRepository, designRepository, memberRepository }));
+
+  // ── Body parsing ──────────────────────────────────────────────────────────
+  app.use(express.json({ limit: "20mb" }));
+
+  // Serve uploaded images as static files
+  app.use("/uploads", express.static(uploadsDir, { maxAge: "7d" }));
+
   const authService = new AuthService(config);
   const memberAuthService = new MemberAuthService(memberRepository);
   const analyticsService = new AnalyticsService();
   const pipelineService = new PodPipelineService(uploadsDir);
   const assetStorageService = new AssetStorageService(assetRepository);
-  const publishService = new ShopifyPublishService(config);
+  const publishService = new ShopifyPublishService(config, settingsRepository);
   const printfulMockupService = new PrintfulMockupService(uploadsDir);
 
   // ── OAuth install/callback ────────────────────────────────────────────────

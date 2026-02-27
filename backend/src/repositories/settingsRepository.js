@@ -41,6 +41,14 @@ class SettingsRepository {
     this.store.write(db);
     return merged;
   }
+
+  deleteByShop(shopDomain) {
+    const db = this.store.read();
+    const before = db.settings.length;
+    db.settings = db.settings.filter((item) => item.shopDomain !== shopDomain);
+    this.store.write(db);
+    return before - db.settings.length;
+  }
 }
 
 module.exports = {

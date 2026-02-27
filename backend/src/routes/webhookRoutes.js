@@ -2,11 +2,11 @@ const express = require("express");
 const crypto = require("crypto");
 
 /**
- * Shopify mandatory GDPR webhook handlers.
+ * Shopify mandatory GDPR webhook handlers + APP_UNINSTALLED.
  * Required for App Store submission.
  * See: https://shopify.dev/docs/apps/webhooks/configuration/mandatory-webhooks
  */
-function createWebhookRouter({ config }) {
+function createWebhookRouter({ config, settingsRepository, designRepository, memberRepository }) {
   const router = express.Router();
 
   // Use raw body for HMAC verification
@@ -48,43 +48,93 @@ function createWebhookRouter({ config }) {
   router.use(verifyWebhookHmac);
 
   // ── customers/data_request ─────────────────────────────────────────────────
-  // Shopify sends this when a customer requests their data.
-  // Since this app does not store customer PII, we acknowledge and return 200.
   router.post("/customers/data_request", (req, res) => {
     const { shop_domain, customer } = req.body;
     console.log(
       `[GDPR] customers/data_request from ${shop_domain} for customer ${customer?.id}`
     );
-
     // This app does not store customer personal data.
-    // If it did, you would compile and return the customer's data here.
     return res.status(200).json({ received: true });
   });
 
   // ── customers/redact ───────────────────────────────────────────────────────
-  // Shopify sends this when a store owner requests deletion of customer data.
   router.post("/customers/redact", (req, res) => {
     const { shop_domain, customer } = req.body;
     console.log(
       `[GDPR] customers/redact from ${shop_domain} for customer ${customer?.id}`
     );
-
     // This app does not store customer personal data.
-    // If it did, you would delete the customer's data here.
     return res.status(200).json({ received: true });
   });
 
   // ── shop/redact ────────────────────────────────────────────────────────────
   // Shopify sends this 48 hours after an app is uninstalled.
-  // Delete all shop data.
+  // Delete ALL data associated with this shop from the database.
   router.post("/shop/redact", (req, res) => {
     const { shop_domain } = req.body;
-    console.log(`[GDPR] shop/redact for ${shop_domain}`);
+    console.log(`[GDPR] shop/redact for ${shop_domain} — purging all shop data`);
 
-    // TODO: Delete all data associated with this shop from the database.
-    // For now, acknowledge receipt.
+    try {
+      _purgeShopData(shop_domain);
+      console.log(`[GDPR] shop/redact complete for ${shop_domain}`);
+    } catch (err) {
+      console.error(`[GDPR] shop/redact error for ${shop_domain}:`, err?.message);
+    }
+
     return res.status(200).json({ received: true });
   });
+
+  // ── app/uninstalled ────────────────────────────────────────────────────────
+  // Shopify sends this immediately when the merchant uninstalls the app.
+  // Clean up access tokens and mark shop as uninstalled.
+  router.post("/app/uninstalled", (req, res) => {
+    const shopDomain = req.headers["x-shopify-shop-domain"] || req.body?.myshopify_domain || "";
+    console.log(`[Webhook] app/uninstalled for ${shopDomain}`);
+
+    try {
+      // Revoke stored access token immediately
+      if (settingsRepository) {
+        const settings = settingsRepository.findByShop(shopDomain);
+        if (settings) {
+          settingsRepository.upsertByShop(shopDomain, {
+            shopifyAccessToken: "",
+            shopifyScopes: "",
+            uninstalledAt: Date.now(),
+          });
+          console.log(`[Webhook] Revoked access token for ${shopDomain}`);
+        }
+      }
+    } catch (err) {
+      console.error(`[Webhook] app/uninstalled error:`, err?.message);
+    }
+
+    return res.status(200).json({ received: true });
+  });
+
+  /**
+   * Purge all data for a given shop domain.
+   * Called by shop/redact (48h after uninstall).
+   */
+  function _purgeShopData(shopDomain) {
+    if (!shopDomain) return;
+
+    // Delete all designs for this shop
+    if (designRepository) {
+      const designs = designRepository.listByShop(shopDomain);
+      for (const design of designs) {
+        designRepository.delete(design.id);
+      }
+      console.log(`[Purge] Deleted ${designs.length} designs for ${shopDomain}`);
+    }
+
+    // Delete shop settings (API keys, access tokens)
+    if (settingsRepository) {
+      settingsRepository.deleteByShop(shopDomain);
+      console.log(`[Purge] Deleted settings for ${shopDomain}`);
+    }
+
+    // Note: members are global (not shop-scoped), so they are not deleted here.
+  }
 
   return router;
 }

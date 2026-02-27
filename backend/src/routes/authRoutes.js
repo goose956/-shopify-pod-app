@@ -8,7 +8,23 @@ const crypto = require("crypto");
 function createAuthRouter({ config, authService, settingsRepository }) {
   const router = express.Router();
   const shopify = authService.shopify;
-  const nonces = new Map();
+
+  // ── Nonce helpers (database-backed for multi-instance safety) ──────────
+  function _saveNonce(nonce, shop) {
+    settingsRepository.upsertByShop(`_nonce:${nonce}`, {
+      shop,
+      createdAt: Date.now(),
+    });
+  }
+
+  function _consumeNonce(nonce) {
+    const entry = settingsRepository.findByShop(`_nonce:${nonce}`);
+    if (!entry) return null;
+    settingsRepository.deleteByShop(`_nonce:${nonce}`);
+    // Reject nonces older than 10 minutes
+    if (Date.now() - (entry.createdAt || 0) > 10 * 60 * 1000) return null;
+    return entry;
+  }
 
   // ── GET /auth ──────────────────────────────────────────────────────────────
   // Redirect merchant to Shopify consent screen
@@ -19,12 +35,7 @@ function createAuthRouter({ config, authService, settingsRepository }) {
     }
 
     const nonce = crypto.randomBytes(16).toString("hex");
-    nonces.set(nonce, { shop, createdAt: Date.now() });
-
-    // Clean stale nonces (>10 minutes)
-    for (const [k, v] of nonces) {
-      if (Date.now() - v.createdAt > 10 * 60 * 1000) nonces.delete(k);
-    }
+    _saveNonce(nonce, shop);
 
     const scopes = Array.isArray(config.shopify.scopes)
       ? config.shopify.scopes.join(",")
@@ -52,12 +63,11 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       return res.status(400).send("Missing required query parameters.");
     }
 
-    // Verify nonce
-    const nonceEntry = nonces.get(state);
+    // Verify nonce (database-backed, consumed on use)
+    const nonceEntry = _consumeNonce(state);
     if (!nonceEntry || nonceEntry.shop !== shop) {
       return res.status(403).send("Invalid state / nonce.");
     }
-    nonces.delete(state);
 
     // Verify HMAC
     const queryParams = { ...req.query };

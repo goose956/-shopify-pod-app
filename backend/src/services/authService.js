@@ -29,7 +29,12 @@ class AuthService {
       return null;
     }
 
+    // Dev bypass — blocked in production (NODE_ENV=production)
     if (this.config.dev.allowBypass && token === "dev-session-token") {
+      if (process.env.NODE_ENV === "production") {
+        console.warn("[Auth] ALLOW_DEV_BYPASS is true in production — ignoring dev token for safety");
+        return null;
+      }
       return {
         shopDomain: this.config.dev.devShopDomain,
         subject: "dev-bypass",

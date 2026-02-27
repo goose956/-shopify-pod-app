@@ -13,7 +13,24 @@ process.on("uncaughtException", (err) => {
   const port = Number(process.env.PORT || 3000);
   const app = await createServer();
 
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Backend listening on port ${port}`);
   });
+
+  // ── Graceful shutdown ─────────────────────────────────────────────────────
+  function shutdown(signal) {
+    console.log(`[Shutdown] ${signal} received — closing server…`);
+    server.close(() => {
+      console.log("[Shutdown] HTTP server closed");
+      process.exit(0);
+    });
+    // Force exit after 10s if connections don't drain
+    setTimeout(() => {
+      console.error("[Shutdown] Forced exit after timeout");
+      process.exit(1);
+    }, 10000);
+  }
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 })();

@@ -1,5 +1,7 @@
 const { randomBytes, scryptSync, timingSafeEqual } = require("crypto");
 
+const TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 class MemberAuthService {
   constructor(memberRepository) {
     this.memberRepository = memberRepository;
@@ -110,6 +112,7 @@ class MemberAuthService {
     const token = `member_${this.generateToken()}`;
     const updated = this.memberRepository.update(member.id, {
       authToken: token,
+      tokenIssuedAt: Date.now(),
       lastLoginAt: Date.now(),
     });
 
@@ -127,6 +130,13 @@ class MemberAuthService {
 
     const member = this.memberRepository.findByAuthToken(token);
     if (!member) {
+      return null;
+    }
+
+    // Check token expiry (24 hours)
+    if (member.tokenIssuedAt && Date.now() - member.tokenIssuedAt > TOKEN_EXPIRY_MS) {
+      // Revoke expired token
+      this.memberRepository.update(member.id, { authToken: "" });
       return null;
     }
 

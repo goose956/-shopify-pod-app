@@ -1,5 +1,17 @@
 const express = require("express");
 
+/**
+ * Sanitize user input: strip HTML tags and limit length.
+ * Prevents XSS in data that may be sent to Shopify or rendered in admin.
+ */
+function sanitize(input, maxLength = 2000) {
+  return String(input || "")
+    .replace(/<[^>]*>/g, "")    // strip HTML tags
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "") // strip control chars
+    .trim()
+    .slice(0, maxLength);
+}
+
 function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService }) {
   const router = express.Router();
 
@@ -37,9 +49,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
   router.post("/members/register", async (req, res) => {
     try {
       const member = await memberAuthService.register({
-        email: req.body?.email,
-        fullName: req.body?.fullName,
-        password: req.body?.password,
+        email: sanitize(req.body?.email, 254),
+        fullName: sanitize(req.body?.fullName, 100),
+        password: String(req.body?.password || ""),
       });
       return res.status(201).json({ member });
     } catch (error) {
@@ -100,6 +112,13 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     });
   });
 
+  // Mask API keys for safe display (show first 4 + last 4 chars)
+  function maskKey(key) {
+    const k = String(key || "");
+    if (k.length <= 8) return k ? "****" : "";
+    return k.slice(0, 4) + "****" + k.slice(-4);
+  }
+
   router.get("/settings", async (req, res) => {
     const session = await requireSession(req, res);
     if (!session) {
@@ -109,11 +128,15 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const settings = settingsRepository.findByShop(session.shopDomain);
     return res.json({
       imageProviderDefault: "openai",
-      keiAiApiKey: settings?.keiAiApiKey || "",
-      openAiApiKey: settings?.openAiApiKey || "",
+      keiAiApiKey: maskKey(settings?.keiAiApiKey),
+      openAiApiKey: maskKey(settings?.openAiApiKey),
       kieGenerateUrl: settings?.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
       kieEditUrl: settings?.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
-      printfulApiKey: settings?.printfulApiKey || "",
+      printfulApiKey: maskKey(settings?.printfulApiKey),
+      // Tell the frontend which keys are configured (without exposing them)
+      hasOpenAiKey: Boolean(settings?.openAiApiKey),
+      hasKeiAiKey: Boolean(settings?.keiAiApiKey),
+      hasPrintfulKey: Boolean(settings?.printfulApiKey),
       updatedAt: settings?.updatedAt || null,
     });
   });
@@ -125,27 +148,31 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     const existing = settingsRepository.findByShop(session.shopDomain);
-    const hasKeiApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "keiAiApiKey");
-    const hasOpenAiApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "openAiApiKey");
+
+    // Helper: if the submitted value looks like a masked key (contains ****),
+    // keep the existing stored value instead of overwriting with the mask.
+    function resolveKey(field, submitted, fallback) {
+      if (!Object.prototype.hasOwnProperty.call(req.body || {}, field)) {
+        return String(fallback || "").trim();
+      }
+      const val = String(submitted || "").trim();
+      // If user submitted the masked version back, keep existing
+      if (val.includes("****")) return String(fallback || "").trim();
+      return val;
+    }
+
+    const keiAiApiKey = resolveKey("keiAiApiKey", req.body?.keiAiApiKey, existing?.keiAiApiKey);
+    const openAiApiKey = resolveKey("openAiApiKey", req.body?.openAiApiKey, existing?.openAiApiKey);
+    const printfulApiKey = resolveKey("printfulApiKey", req.body?.printfulApiKey, existing?.printfulApiKey);
+
     const hasKieGenerateUrl = Object.prototype.hasOwnProperty.call(req.body || {}, "kieGenerateUrl");
     const hasKieEditUrl = Object.prototype.hasOwnProperty.call(req.body || {}, "kieEditUrl");
-    const hasPrintfulApiKey = Object.prototype.hasOwnProperty.call(req.body || {}, "printfulApiKey");
-
-    const keiAiApiKey = hasKeiApiKey
-      ? String(req.body?.keiAiApiKey || "").trim()
-      : String(existing?.keiAiApiKey || "").trim();
-    const openAiApiKey = hasOpenAiApiKey
-      ? String(req.body?.openAiApiKey || "").trim()
-      : String(existing?.openAiApiKey || "").trim();
     const kieGenerateUrl = (hasKieGenerateUrl
       ? String(req.body?.kieGenerateUrl || "").trim()
       : String(existing?.kieGenerateUrl || "").trim()) || "https://api.kie.ai/api/v1/gpt4o-image/generate";
     const kieEditUrl = (hasKieEditUrl
       ? String(req.body?.kieEditUrl || "").trim()
       : String(existing?.kieEditUrl || "").trim()) || "https://api.kie.ai/api/v1/gpt4o-image/generate";
-    const printfulApiKey = hasPrintfulApiKey
-      ? String(req.body?.printfulApiKey || "").trim()
-      : String(existing?.printfulApiKey || "").trim();
 
     const settings = settingsRepository.upsertByShop(session.shopDomain, {
       keiAiApiKey,
@@ -157,11 +184,14 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     return res.json({
       imageProviderDefault: "openai",
-      keiAiApiKey: settings.keiAiApiKey,
-      openAiApiKey: settings.openAiApiKey,
+      keiAiApiKey: maskKey(settings.keiAiApiKey),
+      openAiApiKey: maskKey(settings.openAiApiKey),
       kieGenerateUrl: settings.kieGenerateUrl,
       kieEditUrl: settings.kieEditUrl,
-      printfulApiKey: settings.printfulApiKey,
+      printfulApiKey: maskKey(settings.printfulApiKey),
+      hasOpenAiKey: Boolean(settings.openAiApiKey),
+      hasKeiAiKey: Boolean(settings.keiAiApiKey),
+      hasPrintfulKey: Boolean(settings.printfulApiKey),
       updatedAt: settings.updatedAt,
     });
   });
@@ -290,9 +320,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
-    const prompt = String(req.body?.prompt || "").trim();
-    const productType = String(req.body?.productType || "mug").trim().toLowerCase();
-    const imageShape = String(req.body?.imageShape || "square").trim().toLowerCase();
+    const prompt = sanitize(req.body?.prompt, 5000);
+    const productType = sanitize(req.body?.productType || "mug", 50).toLowerCase();
+    const imageShape = sanitize(req.body?.imageShape || "square", 20).toLowerCase();
     const publishImmediately = Boolean(req.body?.publishImmediately);
 
     if (!prompt) {
