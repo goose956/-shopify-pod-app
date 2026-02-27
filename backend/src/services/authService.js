@@ -29,6 +29,15 @@ class AuthService {
       return null;
     }
 
+    // Setup secret — allows admin access before Shopify OAuth is complete.
+    // Works in production too, so you can configure API keys from the Railway URL.
+    if (this.config.dev.setupSecret && token === this.config.dev.setupSecret) {
+      return {
+        shopDomain: this.config.dev.devShopDomain,
+        subject: "setup-admin",
+      };
+    }
+
     // Dev bypass — blocked in production (NODE_ENV=production)
     if (this.config.dev.allowBypass && token === "dev-session-token") {
       if (process.env.NODE_ENV === "production") {

@@ -1,4 +1,4 @@
-const express = require("express");
+﻿const express = require("express");
 
 /**
  * Sanitize user input: strip HTML tags and limit length.
@@ -12,8 +12,27 @@ function sanitize(input, maxLength = 2000) {
     .slice(0, maxLength);
 }
 
-function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService }) {
+function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService, config }) {
   const router = express.Router();
+
+  // Env-var defaults for API keys (fallback when not saved in DB settings)
+  const envDefaults = config?.defaults || {};
+
+  /** Merge saved settings with env-var defaults. DB settings take priority. */
+  function effectiveKey(savedValue, envDefault) {
+    return String(savedValue || envDefault || "").trim();
+  }
+
+  /** Get effective settings for a shop, merging env defaults */
+  function getEffectiveSettings(shopDomain) {
+    const s = settingsRepository.findByShop(shopDomain) || {};
+    return {
+      ...s,
+      openAiApiKey: effectiveKey(s.openAiApiKey, envDefaults.openAiApiKey),
+      printfulApiKey: effectiveKey(s.printfulApiKey, envDefaults.printfulApiKey),
+      keiAiApiKey: effectiveKey(s.keiAiApiKey, envDefaults.kieApiKey),
+    };
+  }
 
   async function resolveSession(req) {
     const shopifySession = await authService.validateRequest(req);
@@ -125,19 +144,19 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
-    const settings = settingsRepository.findByShop(session.shopDomain);
+    const settings = getEffectiveSettings(session.shopDomain);
     return res.json({
       imageProviderDefault: "openai",
-      keiAiApiKey: maskKey(settings?.keiAiApiKey),
-      openAiApiKey: maskKey(settings?.openAiApiKey),
-      kieGenerateUrl: settings?.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
-      kieEditUrl: settings?.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
-      printfulApiKey: maskKey(settings?.printfulApiKey),
+      keiAiApiKey: maskKey(settings.keiAiApiKey),
+      openAiApiKey: maskKey(settings.openAiApiKey),
+      kieGenerateUrl: settings.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+      kieEditUrl: settings.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+      printfulApiKey: maskKey(settings.printfulApiKey),
       // Tell the frontend which keys are configured (without exposing them)
-      hasOpenAiKey: Boolean(settings?.openAiApiKey),
-      hasKeiAiKey: Boolean(settings?.keiAiApiKey),
-      hasPrintfulKey: Boolean(settings?.printfulApiKey),
-      updatedAt: settings?.updatedAt || null,
+      hasOpenAiKey: Boolean(settings.openAiApiKey),
+      hasKeiAiKey: Boolean(settings.keiAiApiKey),
+      hasPrintfulKey: Boolean(settings.printfulApiKey),
+      updatedAt: settings.updatedAt || null,
     });
   });
 
@@ -203,7 +222,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       const keiAiApiKey = String(req.body?.keiAiApiKey || settings?.keiAiApiKey || "").trim();
       const kieGenerateUrl = String(req.body?.kieGenerateUrl || settings?.kieGenerateUrl || "").trim();
       const result = await pipelineService.generateDesignImage({
@@ -234,7 +253,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       const openAiApiKey = String(req.body?.openAiApiKey || settings?.openAiApiKey || "").trim();
 
       const copyResult = await pipelineService.generateListingCopy({
@@ -266,7 +285,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           }).catch(() => null);
           if (fallbackResponse?.ok) {
             imageProvider = "dall-e-3";
-            imageMessage = `gpt-image-1 not on this tier (${probeResponse.status}) — dall-e-3 will be used`;
+            imageMessage = `gpt-image-1 not on this tier (${probeResponse.status}) â€” dall-e-3 will be used`;
           } else {
             const errBody = await probeResponse.json().catch(() => ({}));
             imageProvider = "error";
@@ -301,7 +320,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       const result = await pipelineService.analyzeProductImage({
         imageBase64,
         openAiApiKey: settings?.openAiApiKey || "",
@@ -330,7 +349,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
 
       // Generate ONLY the raw isolated artwork (mockup comes later when user approves)
       const artworkPrompt = await pipelineService.buildArtworkPrompt({ prompt, productType });
@@ -393,7 +412,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       if (!settings?.printfulApiKey) {
         return res.json({ products: [], source: "no-key" });
       }
@@ -429,7 +448,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       const imageShape = String(req.body?.imageShape || "square").trim().toLowerCase();
       const printfulProductId = req.body?.printfulProductId || null;
 
@@ -541,7 +560,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       const artworkPrompt = await pipelineService.buildArtworkPrompt({
         prompt: design.prompt,
         productType: design.productType,
@@ -640,7 +659,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(404).json({ error: "Design not found" });
     }
 
-    // ── Idempotency: if already published, return existing product ──────────
+    // â”€â”€ Idempotency: if already published, return existing product â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     if (design.status === "published" && design.shopifyProductId) {
       return res.json({
         productId: design.shopifyProductId,
@@ -664,7 +683,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       : [];
 
     try {
-      const settings = settingsRepository.findByShop(session.shopDomain);
+      const settings = getEffectiveSettings(session.shopDomain);
       let lifestyleResult = await pipelineService.generateLifestyleImages({
         productType: design.productType,
         baseDesignImageUrl: design.previewImageUrl,

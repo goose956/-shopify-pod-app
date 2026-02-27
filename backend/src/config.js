@@ -13,6 +13,12 @@ function getConfig() {
     dev: {
       allowBypass: process.env.ALLOW_DEV_BYPASS === "true",
       devShopDomain: process.env.DEV_SHOP_DOMAIN || "example.myshopify.com",
+      setupSecret: process.env.SETUP_SECRET || "",
+    },
+    defaults: {
+      openAiApiKey: process.env.OPENAI_API_KEY || "",
+      printfulApiKey: process.env.PRINTFUL_API_KEY || "",
+      kieApiKey: process.env.KIE_API_KEY || "",
     },
     storage: {
       databaseUrl: process.env.DATABASE_URL || "",

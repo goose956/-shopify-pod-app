@@ -190,6 +190,7 @@ async function createServer() {
       assetStorageService,
       publishService,
       printfulMockupService,
+      config,
     })
   );
 
