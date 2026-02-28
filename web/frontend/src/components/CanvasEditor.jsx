@@ -155,6 +155,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
   const canvasRef = useRef(null);
   const fabricRef = useRef(null);
   const bgImageRef = useRef(null);
+  const containerDivRef = useRef(null);
 
   // Layer state
   const [layers, setLayers] = useState([]);
@@ -307,6 +308,36 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       fabricRef.current = null;
     };
   }, [imageUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Scale canvas to fit its container ──────────────────────────────────── */
+  useEffect(() => {
+    if (!canvasReady || !fabricRef.current) return;
+
+    const containerEl = containerDivRef.current;
+    // Fabric wraps the <canvas> in a div — get the wrapper element
+    const wrapperEl =
+      fabricRef.current.wrapperEl ||
+      canvasRef.current?.parentElement;
+    if (!containerEl || !wrapperEl) return;
+
+    const fitCanvas = () => {
+      const pad = 32; // account for container padding
+      const availW = containerEl.clientWidth - pad;
+      const availH = containerEl.clientHeight - pad;
+      const scale = Math.min(1, availW / CANVAS_SIZE, availH / CANVAS_SIZE);
+      if (scale < 1) {
+        wrapperEl.style.transform = `scale(${scale})`;
+        wrapperEl.style.transformOrigin = "center center";
+      } else {
+        wrapperEl.style.transform = "";
+      }
+    };
+
+    fitCanvas();
+    const observer = new ResizeObserver(fitCanvas);
+    observer.observe(containerEl);
+    return () => observer.disconnect();
+  }, [canvasReady]);
 
   /* ── Update controls when an object is selected ────────────────────────── */
   const updateControlsFromObject = useCallback((obj) => {
@@ -614,7 +645,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
           </div>
 
           {/* Center — Canvas */}
-          <div style={styles.canvasContainer}>
+          <div ref={containerDivRef} style={styles.canvasContainer}>
             {!canvasReady && (
               <div style={styles.canvasLoading}>
                 <Spinner size="large" />
