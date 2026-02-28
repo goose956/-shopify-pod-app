@@ -172,6 +172,11 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
   const [strokeColor, setStrokeColor] = useState({ hue: 0, saturation: 0, brightness: 1 });
   const [rotation, setRotation] = useState(0);
 
+  // Transform controls (position & scale)
+  const [posX, setPosX] = useState(0);
+  const [posY, setPosY] = useState(0);
+  const [layerScale, setLayerScale] = useState(100);
+
   // UI state
   const [isSaving, setIsSaving] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -307,7 +312,26 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     canvas.on("selection:cleared", () => {
       setActiveLayerId(null);
     });
-    canvas.on("object:modified", () => syncLayers());
+    canvas.on("object:modified", (e) => {
+      syncLayers();
+      if (e.target) updateControlsFromObject(e.target);
+    });
+    canvas.on("object:moving", (e) => {
+      if (e.target) {
+        setPosX(Math.round(e.target.left || 0));
+        setPosY(Math.round(e.target.top || 0));
+      }
+    });
+    canvas.on("object:scaling", (e) => {
+      if (e.target) {
+        setLayerScale(Math.round((e.target.scaleX || 1) * 100));
+      }
+    });
+    canvas.on("object:rotating", (e) => {
+      if (e.target) {
+        setRotation(Math.round(e.target.angle || 0));
+      }
+    });
     canvas.on("text:changed", () => syncLayers());
 
     return () => {
@@ -346,13 +370,18 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
 
   /* ── Update controls when an object is selected ────────────────────────── */
   const updateControlsFromObject = useCallback((obj) => {
+    // Position & scale (common to all layer types)
+    setPosX(Math.round(obj.left || 0));
+    setPosY(Math.round(obj.top || 0));
+    setLayerScale(Math.round((obj.scaleX || 1) * 100));
+    setRotation(Math.round(obj.angle || 0));
+
     if (obj.type === "textbox") {
       setTextContent(obj.text || "");
       setSelectedFont(obj.fontFamily || "Roboto");
       setFontSize(Math.round(obj.fontSize || 48));
       setFontBold(obj.fontWeight === "bold");
       setFontItalic(obj.fontStyle === "italic");
-      setRotation(Math.round(obj.angle || 0));
       try {
         const fill = obj.fill || "#000000";
         setFontColor(hexToHsb(fill));
@@ -372,19 +401,25 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     }
   }, []);
 
-  /* ── Get active text object ────────────────────────────────────────────── */
-  const getActiveTextObject = useCallback(() => {
+  /* ── Get active layer object (any type) ─────────────────────────────────── */
+  const getActiveLayerObject = useCallback(() => {
     const canvas = fabricRef.current;
     if (!canvas) return null;
     const active = canvas.getActiveObject();
-    if (active && active.type === "textbox") return active;
+    if (active && active._layerId) return active;
     // Fallback: find by activeLayerId
     if (activeLayerId) {
       const obj = canvas.getObjects().find((o) => o._layerId === activeLayerId);
-      if (obj && obj.type === "textbox") return obj;
+      if (obj) return obj;
     }
     return null;
   }, [activeLayerId]);
+
+  /* ── Get active text object (text-specific) ────────────────────────────── */
+  const getActiveTextObject = useCallback(() => {
+    const obj = getActiveLayerObject();
+    return obj && obj.type === "textbox" ? obj : null;
+  }, [getActiveLayerObject]);
 
   /* ── Add text layer ────────────────────────────────────────────────────── */
   const handleAddText = useCallback(async () => {
@@ -482,6 +517,41 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     setRotation(angle);
     applyToActive({ angle });
   }, [applyToActive]);
+
+  /* ── Position & scale handlers ─────────────────────────────────────────── */
+  const handlePosXChange = useCallback((val) => {
+    const v = Number(val);
+    setPosX(v);
+    const obj = getActiveLayerObject();
+    if (obj) {
+      obj.set({ left: v });
+      obj.setCoords();
+      fabricRef.current?.renderAll();
+    }
+  }, [getActiveLayerObject]);
+
+  const handlePosYChange = useCallback((val) => {
+    const v = Number(val);
+    setPosY(v);
+    const obj = getActiveLayerObject();
+    if (obj) {
+      obj.set({ top: v });
+      obj.setCoords();
+      fabricRef.current?.renderAll();
+    }
+  }, [getActiveLayerObject]);
+
+  const handleScaleChange = useCallback((val) => {
+    const pct = Number(val);
+    setLayerScale(pct);
+    const s = pct / 100;
+    const obj = getActiveLayerObject();
+    if (obj) {
+      obj.set({ scaleX: s, scaleY: s });
+      obj.setCoords();
+      fabricRef.current?.renderAll();
+    }
+  }, [getActiveLayerObject]);
 
   const handleTextContentChange = useCallback((val) => {
     setTextContent(val);
@@ -782,6 +852,52 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
                     )}
                   </div>
                 )}
+
+                {/* ── Transform: Position / Scale / Rotation ── */}
+                <div style={{ borderTop: "1px solid #e1e3e5", paddingTop: 12 }}>
+                  <Text variant="bodySm" as="p" fontWeight="semibold">Position</Text>
+                  <InlineStack gap="200">
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        label="X"
+                        type="number"
+                        value={String(posX)}
+                        onChange={handlePosXChange}
+                        autoComplete="off"
+                        labelHidden
+                        prefix="X"
+                        suffix="px"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        label="Y"
+                        type="number"
+                        value={String(posY)}
+                        onChange={handlePosYChange}
+                        autoComplete="off"
+                        labelHidden
+                        prefix="Y"
+                        suffix="px"
+                      />
+                    </div>
+                  </InlineStack>
+                </div>
+
+                <div>
+                  <Text variant="bodySm" as="p" fontWeight="semibold">Scale</Text>
+                  <InlineStack gap="200" blockAlign="center">
+                    <input
+                      type="range"
+                      min={10}
+                      max={400}
+                      value={layerScale}
+                      onChange={(e) => handleScaleChange(e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    <span style={{ fontSize: 12, minWidth: 40, textAlign: "right" }}>{layerScale}%</span>
+                  </InlineStack>
+                </div>
 
                 {/* Rotation */}
                 <div>
