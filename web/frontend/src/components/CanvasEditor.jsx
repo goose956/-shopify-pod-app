@@ -207,16 +207,33 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
 
     // Load background image
     if (imageUrl) {
-      // Ensure the URL is absolute so the canvas can fetch it
-      let resolvedUrl = imageUrl;
-      if (resolvedUrl.startsWith("/")) {
-        resolvedUrl = window.location.origin + resolvedUrl;
-      }
-      console.log("[CanvasEditor] Loading background image:", resolvedUrl);
+      console.log("[CanvasEditor] Loading background image:", imageUrl);
 
-      fabric.FabricImage.fromURL(resolvedUrl, { crossOrigin: "anonymous" }).then((img) => {
+      // Strategy: fetch the image as a blob, convert to a data URL,
+      // then load into Fabric. This avoids all CORS/crossOrigin issues
+      // when running inside a Shopify iframe.
+      const loadViaFetch = async () => {
+        try {
+          const resp = await fetch(imageUrl);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          console.log("[CanvasEditor] Image fetched as data URL, size:", (dataUrl.length / 1024).toFixed(1), "KB");
+          return dataUrl;
+        } catch (err) {
+          console.warn("[CanvasEditor] Fetch failed, trying direct:", err.message);
+          return null;
+        }
+      };
+
+      const addImageToCanvas = (img) => {
         if (!img || !img.width || !img.height) {
-          console.error("[CanvasEditor] Image loaded but has no dimensions");
+          console.error("[CanvasEditor] Image has no dimensions");
           setCanvasReady(true);
           return;
         }
@@ -235,35 +252,30 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
         canvas.insertAt(0, img);
         canvas.renderAll();
         setCanvasReady(true);
+      };
+
+      loadViaFetch().then((dataUrl) => {
+        const urlToLoad = dataUrl || imageUrl;
+        // Try FabricImage.fromURL first
+        return fabric.FabricImage.fromURL(urlToLoad).then(addImageToCanvas);
       }).catch((err) => {
-        console.error("[CanvasEditor] Failed to load background image:", err);
-        // Fallback: try loading via an HTML Image element directly
-        const htmlImg = new Image();
-        htmlImg.crossOrigin = "anonymous";
+        console.warn("[CanvasEditor] FabricImage.fromURL failed:", err.message);
+        // Final fallback: load via HTML Image element (no crossOrigin)
+        const htmlImg = new window.Image();
         htmlImg.onload = () => {
-          console.log("[CanvasEditor] Fallback image loaded:", htmlImg.width, "x", htmlImg.height);
+          console.log("[CanvasEditor] Fallback HTML Image loaded:", htmlImg.naturalWidth, "x", htmlImg.naturalHeight);
           const fImg = new fabric.FabricImage(htmlImg);
-          const scale = Math.min(800 / fImg.width, 800 / fImg.height);
-          fImg.scaleX = scale;
-          fImg.scaleY = scale;
-          fImg.left = (800 - fImg.width * scale) / 2;
-          fImg.top = (800 - fImg.height * scale) / 2;
-          fImg.selectable = false;
-          fImg.evented = false;
-          fImg.hoverCursor = "default";
-          fImg._isBackground = true;
-          bgImageRef.current = fImg;
-          canvas.insertAt(0, fImg);
-          canvas.renderAll();
-          setCanvasReady(true);
+          addImageToCanvas(fImg);
         };
         htmlImg.onerror = (e) => {
-          console.error("[CanvasEditor] Fallback also failed:", e);
+          console.error("[CanvasEditor] All image loading methods failed");
           setCanvasReady(true);
         };
-        htmlImg.src = resolvedUrl;
+        // Don't set crossOrigin — avoids CORS issues for same-origin images
+        htmlImg.src = imageUrl;
       });
     } else {
+      console.log("[CanvasEditor] No imageUrl provided");
       setCanvasReady(true);
     }
 
