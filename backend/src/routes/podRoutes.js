@@ -837,6 +837,74 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
   });
 
+  // ── Save canvas-edited artwork (base64 PNG from the design editor) ──────
+  router.post("/save-edited-artwork", async (req, res) => {
+    const session = await requireSession(req, res);
+    if (!session) return;
+
+    const designId = String(req.body?.designId || "").trim();
+    const imageData = req.body?.imageData; // base64 data URL
+
+    if (!designId || !imageData) {
+      return res.status(400).json({ error: "designId and imageData are required" });
+    }
+
+    const design = designRepository.findById(designId);
+    if (!design || design.shopDomain !== session.shopDomain) {
+      return res.status(404).json({ error: "Design not found" });
+    }
+
+    try {
+      // Strip data URL prefix: "data:image/png;base64,..."
+      const base64Match = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
+      if (!base64Match) {
+        return res.status(400).json({ error: "Invalid image data format. Expected base64 data URL." });
+      }
+      const ext = base64Match[1] === "jpeg" ? "jpg" : base64Match[1];
+      const buffer = Buffer.from(base64Match[2], "base64");
+
+      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+      const filename = `${randomUUID()}-edited.${ext}`;
+      const filePath = path.join(uploadsDir, filename);
+      fs.writeFileSync(filePath, buffer);
+
+      const editedUrl = `/uploads/${filename}`;
+      console.log(`[CanvasEditor] Saved edited artwork → ${filename} (${(buffer.length / 1024).toFixed(1)} KB)`);
+
+      // Save as asset
+      const editedAsset = assetStorageService.saveAsset({
+        designId,
+        shopDomain: session.shopDomain,
+        type: "design-preview",
+        role: "canvas-edit",
+        url: editedUrl,
+        promptSnapshot: "Canvas editor edit",
+      });
+
+      // Update design record
+      designRepository.update(designId, {
+        previewImageUrl: editedUrl,
+        rawArtworkUrl: editedUrl,
+        currentDesignAssetId: editedAsset.id,
+        mockupImageUrl: null, // Clear mockup since artwork changed
+        status: "preview_ready",
+        updatedAt: Date.now(),
+      });
+
+      return res.json({
+        designId,
+        rawArtworkUrl: editedUrl,
+        designImageUrl: editedUrl,
+        message: "Edited artwork saved successfully",
+      });
+    } catch (error) {
+      console.error("[CanvasEditor] Save error:", error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to save edited artwork",
+      });
+    }
+  });
+
   router.post("/finalize-product", async (req, res) => {
     const session = await requireSession(req, res);
     if (!session) {

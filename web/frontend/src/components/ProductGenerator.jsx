@@ -27,6 +27,7 @@ import {
 import { getSessionToken } from "../utils/sessionToken";
 import { DesignLibrary } from "./DesignLibrary";
 import { AdminDashboard } from "./AdminDashboard";
+import { CanvasEditor } from "./CanvasEditor";
 
 function buildDefaultLifestylePrompt(productType, index) {
   const defaults = [
@@ -119,6 +120,7 @@ export function ProductGenerator() {
   const [designId, setDesignId] = useState("");
   const [designImageUrl, setDesignImageUrl] = useState("");
   const [rawArtworkUrl, setRawArtworkUrl] = useState("");
+  const [showCanvasEditor, setShowCanvasEditor] = useState(false);
   const [providerStatus, setProviderStatus] = useState(null);
   const [amendment, setAmendment] = useState("");
   const [lifestyleImages, setLifestyleImages] = useState([]);
@@ -365,6 +367,28 @@ export function ProductGenerator() {
       setError(err.message || "Failed to generate design preview.");
     } finally {
       setIsGeneratingDesign(false);
+    }
+  };
+
+  const handleSaveEditedArtwork = async (dataUrl) => {
+    setError(null);
+    try {
+      const sessionToken = await getSessionToken();
+      const response = await fetch("/api/save-edited-artwork", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
+        body: JSON.stringify({ designId, imageData: dataUrl }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save edited artwork.");
+      }
+      const data = await response.json();
+      setRawArtworkUrl(data.rawArtworkUrl || data.designImageUrl);
+      setDesignImageUrl(""); // Clear mockup since artwork was edited
+      setShowCanvasEditor(false);
+    } catch (err) {
+      setError(err.message || "Failed to save edited artwork.");
     }
   };
 
@@ -1075,11 +1099,27 @@ export function ProductGenerator() {
                     >
                       {isGeneratingMockup ? "Generating Mockup..." : "Happy with Artwork \u2014 Generate Product Mockup"}
                     </Button>
+                    <Button
+                      onClick={() => setShowCanvasEditor(true)}
+                      disabled={isWorking}
+                      icon={EditIcon}
+                    >
+                      Edit Design
+                    </Button>
                     <Button onClick={() => setSelectedTab(0)} disabled={isWorking}>
                       Back to Describe
                     </Button>
                   </InlineStack>
                 </>
+              )}
+
+              {/* Canvas Editor Modal */}
+              {showCanvasEditor && (
+                <CanvasEditor
+                  imageUrl={rawArtworkUrl || designImageUrl}
+                  onSave={handleSaveEditedArtwork}
+                  onClose={() => setShowCanvasEditor(false)}
+                />
               )}
             </BlockStack>
           </Card>
