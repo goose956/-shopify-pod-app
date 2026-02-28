@@ -362,9 +362,9 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       const availH = containerEl.clientHeight - pad;
       if (availW <= 0 || availH <= 0) return;
       const scale = Math.min(1, availW / CANVAS_SIZE, availH / CANVAS_SIZE);
-      // setZoom handles pointer-event mapping.
-      // cssOnly keeps the backstore at CANVAS_SIZE while shrinking the visible element.
-      canvas.setZoom(scale);
+      // cssOnly: shrink the visible canvas via CSS while keeping the backstore
+      // at CANVAS_SIZE. Fabric maps pointer coords via the cssScale ratio
+      // (canvasEl.width / boundingRect.width) automatically — no setZoom needed.
       canvas.setDimensions(
         { width: CANVAS_SIZE * scale + 'px', height: CANVAS_SIZE * scale + 'px' },
         { cssOnly: true }
@@ -635,28 +635,15 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     try {
       // Deselect to remove selection handles from export
       canvas.discardActiveObject();
-      // Reset zoom to 1 for full-res export
-      const currentZoom = canvas.getZoom();
-      canvas.setZoom(1);
-      canvas.setDimensions(
-        { width: CANVAS_SIZE + 'px', height: CANVAS_SIZE + 'px' },
-        { cssOnly: true }
-      );
       canvas.renderAll();
 
+      // Export at full resolution — backstore is always CANVAS_SIZE,
+      // multiplier upscales to 800px.
       const dataUrl = canvas.toDataURL({
         format: "png",
         quality: 1,
         multiplier: 800 / CANVAS_SIZE,
       });
-
-      // Restore zoom
-      canvas.setZoom(currentZoom);
-      canvas.setDimensions(
-        { width: CANVAS_SIZE * currentZoom + 'px', height: CANVAS_SIZE * currentZoom + 'px' },
-        { cssOnly: true }
-      );
-      canvas.renderAll();
 
       if (onSave) {
         await onSave(dataUrl);
