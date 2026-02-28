@@ -619,7 +619,12 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
                 <Text variant="bodySm" tone="subdued">Loading image...</Text>
               </div>
             )}
-            <canvas ref={canvasRef} style={{ display: canvasReady ? "block" : "none" }} />
+            <canvas ref={canvasRef} style={{
+              display: canvasReady ? "block" : "none",
+              maxWidth: "100%",
+              maxHeight: "calc(95vh - 120px)",
+              objectFit: "contain",
+            }} />
           </div>
 
           {/* Right Panel — Properties */}
@@ -880,9 +885,10 @@ const styles = {
     justifyContent: "center",
     padding: 16,
     background: "#e8e8e8",
-    overflow: "auto",
+    overflow: "hidden",
     position: "relative",
     minWidth: 0,
+    minHeight: 0,
   },
   canvasLoading: {
     position: "absolute",
