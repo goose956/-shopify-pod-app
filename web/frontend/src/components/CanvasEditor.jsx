@@ -189,7 +189,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     if (!canvas) return;
     const objects = canvas.getObjects();
     const layerList = objects
-      .filter((obj) => obj !== bgImageRef.current)
+      .filter((obj) => obj._layerId) // only tracked layers (image + text)
       .map((obj, idx) => ({
         id: obj._layerId || `layer-${idx}`,
         name: obj._layerName || (obj.type === "textbox" ? obj.text?.slice(0, 20) || "Text" : `Layer ${idx + 1}`),
@@ -362,10 +362,13 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       const availH = containerEl.clientHeight - pad;
       if (availW <= 0 || availH <= 0) return;
       const scale = Math.min(1, availW / CANVAS_SIZE, availH / CANVAS_SIZE);
-      // Use setZoom + real dimension change so pointer events map correctly.
-      // This ensures objects can be dragged/selected accurately.
+      // setZoom handles pointer-event mapping.
+      // cssOnly keeps the backstore at CANVAS_SIZE while shrinking the visible element.
       canvas.setZoom(scale);
-      canvas.setDimensions({ width: CANVAS_SIZE * scale, height: CANVAS_SIZE * scale });
+      canvas.setDimensions(
+        { width: CANVAS_SIZE * scale + 'px', height: CANVAS_SIZE * scale + 'px' },
+        { cssOnly: true }
+      );
     };
 
     fitCanvas();
@@ -635,7 +638,10 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       // Reset zoom to 1 for full-res export
       const currentZoom = canvas.getZoom();
       canvas.setZoom(1);
-      canvas.setDimensions({ width: CANVAS_SIZE, height: CANVAS_SIZE });
+      canvas.setDimensions(
+        { width: CANVAS_SIZE + 'px', height: CANVAS_SIZE + 'px' },
+        { cssOnly: true }
+      );
       canvas.renderAll();
 
       const dataUrl = canvas.toDataURL({
@@ -646,7 +652,10 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
 
       // Restore zoom
       canvas.setZoom(currentZoom);
-      canvas.setDimensions({ width: CANVAS_SIZE * currentZoom, height: CANVAS_SIZE * currentZoom });
+      canvas.setDimensions(
+        { width: CANVAS_SIZE * currentZoom + 'px', height: CANVAS_SIZE * currentZoom + 'px' },
+        { cssOnly: true }
+      );
       canvas.renderAll();
 
       if (onSave) {
