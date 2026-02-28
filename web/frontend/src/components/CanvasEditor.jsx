@@ -207,7 +207,20 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
 
     // Load background image
     if (imageUrl) {
-      fabric.FabricImage.fromURL(imageUrl, { crossOrigin: "anonymous" }).then((img) => {
+      // Ensure the URL is absolute so the canvas can fetch it
+      let resolvedUrl = imageUrl;
+      if (resolvedUrl.startsWith("/")) {
+        resolvedUrl = window.location.origin + resolvedUrl;
+      }
+      console.log("[CanvasEditor] Loading background image:", resolvedUrl);
+
+      fabric.FabricImage.fromURL(resolvedUrl, { crossOrigin: "anonymous" }).then((img) => {
+        if (!img || !img.width || !img.height) {
+          console.error("[CanvasEditor] Image loaded but has no dimensions");
+          setCanvasReady(true);
+          return;
+        }
+        console.log("[CanvasEditor] Image loaded:", img.width, "x", img.height);
         const scale = Math.min(800 / img.width, 800 / img.height);
         img.scaleX = scale;
         img.scaleY = scale;
@@ -218,12 +231,37 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
         img.hoverCursor = "default";
         img._isBackground = true;
         bgImageRef.current = img;
-        canvas.insertAt(img, 0);
+        // Fabric.js v7: insertAt(index, ...objects)
+        canvas.insertAt(0, img);
         canvas.renderAll();
         setCanvasReady(true);
       }).catch((err) => {
-        console.error("Failed to load background image:", err);
-        setCanvasReady(true);
+        console.error("[CanvasEditor] Failed to load background image:", err);
+        // Fallback: try loading via an HTML Image element directly
+        const htmlImg = new Image();
+        htmlImg.crossOrigin = "anonymous";
+        htmlImg.onload = () => {
+          console.log("[CanvasEditor] Fallback image loaded:", htmlImg.width, "x", htmlImg.height);
+          const fImg = new fabric.FabricImage(htmlImg);
+          const scale = Math.min(800 / fImg.width, 800 / fImg.height);
+          fImg.scaleX = scale;
+          fImg.scaleY = scale;
+          fImg.left = (800 - fImg.width * scale) / 2;
+          fImg.top = (800 - fImg.height * scale) / 2;
+          fImg.selectable = false;
+          fImg.evented = false;
+          fImg.hoverCursor = "default";
+          fImg._isBackground = true;
+          bgImageRef.current = fImg;
+          canvas.insertAt(0, fImg);
+          canvas.renderAll();
+          setCanvasReady(true);
+        };
+        htmlImg.onerror = (e) => {
+          console.error("[CanvasEditor] Fallback also failed:", e);
+          setCanvasReady(true);
+        };
+        htmlImg.src = resolvedUrl;
       });
     } else {
       setCanvasReady(true);
