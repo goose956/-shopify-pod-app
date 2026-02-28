@@ -240,15 +240,22 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
           setCanvasReady(true);
           return;
         }
-        console.log("[CanvasEditor] Image loaded:", img.width, "x", img.height);
-        const scale = Math.min(CANVAS_SIZE / img.width, CANVAS_SIZE / img.height);
-        img.scaleX = scale;
-        img.scaleY = scale;
-        img.left = (CANVAS_SIZE - img.width * scale) / 2;
-        img.top = (CANVAS_SIZE - img.height * scale) / 2;
-        img.selectable = false;
-        img.evented = false;
-        img.hoverCursor = "default";
+        // Use the HTML element's natural dimensions for reliable sizing
+        const natW = img.getElement?.()?.naturalWidth || img.width;
+        const natH = img.getElement?.()?.naturalHeight || img.height;
+        console.log("[CanvasEditor] Image loaded:", natW, "x", natH, "(fabric w/h:", img.width, "x", img.height, ")");
+        const scale = Math.min(CANVAS_SIZE / natW, CANVAS_SIZE / natH);
+        img.set({
+          scaleX: scale,
+          scaleY: scale,
+          left: (CANVAS_SIZE - natW * scale) / 2,
+          top: (CANVAS_SIZE - natH * scale) / 2,
+          originX: "left",
+          originY: "top",
+          selectable: false,
+          evented: false,
+          hoverCursor: "default",
+        });
         img._isBackground = true;
         bgImageRef.current = img;
         // Fabric.js v7: insertAt(index, ...objects)
@@ -314,23 +321,21 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     if (!canvasReady || !fabricRef.current) return;
 
     const containerEl = containerDivRef.current;
-    // Fabric wraps the <canvas> in a div — get the wrapper element
-    const wrapperEl =
-      fabricRef.current.wrapperEl ||
-      canvasRef.current?.parentElement;
-    if (!containerEl || !wrapperEl) return;
+    const canvas = fabricRef.current;
+    if (!containerEl) return;
 
     const fitCanvas = () => {
       const pad = 32; // account for container padding
       const availW = containerEl.clientWidth - pad;
       const availH = containerEl.clientHeight - pad;
+      if (availW <= 0 || availH <= 0) return;
       const scale = Math.min(1, availW / CANVAS_SIZE, availH / CANVAS_SIZE);
-      if (scale < 1) {
-        wrapperEl.style.transform = `scale(${scale})`;
-        wrapperEl.style.transformOrigin = "center center";
-      } else {
-        wrapperEl.style.transform = "";
-      }
+      // Use Fabric's native CSS-only resize — keeps internal resolution at
+      // CANVAS_SIZE but renders smaller on screen. No layout/overflow issues.
+      canvas.setDimensions(
+        { width: CANVAS_SIZE * scale, height: CANVAS_SIZE * scale },
+        { cssOnly: true }
+      );
     };
 
     fitCanvas();
