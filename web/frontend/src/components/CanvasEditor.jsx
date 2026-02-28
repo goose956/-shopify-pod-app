@@ -365,8 +365,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       // Use setZoom + real dimension change so pointer events map correctly.
       // This ensures objects can be dragged/selected accurately.
       canvas.setZoom(scale);
-      canvas.setWidth(CANVAS_SIZE * scale);
-      canvas.setHeight(CANVAS_SIZE * scale);
+      canvas.setDimensions({ width: CANVAS_SIZE * scale, height: CANVAS_SIZE * scale });
     };
 
     fitCanvas();
@@ -636,8 +635,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       // Reset zoom to 1 for full-res export
       const currentZoom = canvas.getZoom();
       canvas.setZoom(1);
-      canvas.setWidth(CANVAS_SIZE);
-      canvas.setHeight(CANVAS_SIZE);
+      canvas.setDimensions({ width: CANVAS_SIZE, height: CANVAS_SIZE });
       canvas.renderAll();
 
       const dataUrl = canvas.toDataURL({
@@ -648,8 +646,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
 
       // Restore zoom
       canvas.setZoom(currentZoom);
-      canvas.setWidth(CANVAS_SIZE * currentZoom);
-      canvas.setHeight(CANVAS_SIZE * currentZoom);
+      canvas.setDimensions({ width: CANVAS_SIZE * currentZoom, height: CANVAS_SIZE * currentZoom });
       canvas.renderAll();
 
       if (onSave) {
