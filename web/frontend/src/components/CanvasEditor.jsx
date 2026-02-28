@@ -250,6 +250,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
         const natH = img.getElement?.()?.naturalHeight || img.height;
         console.log("[CanvasEditor] Image loaded:", natW, "x", natH, "(fabric w/h:", img.width, "x", img.height, ")");
         const scale = Math.min(CANVAS_SIZE / natW, CANVAS_SIZE / natH);
+        const imgId = `image-${Date.now()}`;
         img.set({
           scaleX: scale,
           scaleY: scale,
@@ -257,15 +258,22 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
           top: (CANVAS_SIZE - natH * scale) / 2,
           originX: "left",
           originY: "top",
-          selectable: false,
-          evented: false,
-          hoverCursor: "default",
+          selectable: true,
+          evented: true,
+          cornerStyle: "circle",
+          cornerColor: "#2c6ecb",
+          borderColor: "#2c6ecb",
+          transparentCorners: false,
+          padding: 8,
         });
+        img._layerId = imgId;
+        img._layerName = "Image";
         img._isBackground = true;
         bgImageRef.current = img;
         // Fabric.js v7: insertAt(index, ...objects)
         canvas.insertAt(0, img);
         canvas.renderAll();
+        syncLayers();
         setCanvasReady(true);
       };
 
@@ -354,12 +362,11 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       const availH = containerEl.clientHeight - pad;
       if (availW <= 0 || availH <= 0) return;
       const scale = Math.min(1, availW / CANVAS_SIZE, availH / CANVAS_SIZE);
-      // Use Fabric's native CSS-only resize — keeps internal resolution at
-      // CANVAS_SIZE but renders smaller on screen. No layout/overflow issues.
-      canvas.setDimensions(
-        { width: CANVAS_SIZE * scale, height: CANVAS_SIZE * scale },
-        { cssOnly: true }
-      );
+      // Use setZoom + real dimension change so pointer events map correctly.
+      // This ensures objects can be dragged/selected accurately.
+      canvas.setZoom(scale);
+      canvas.setWidth(CANVAS_SIZE * scale);
+      canvas.setHeight(CANVAS_SIZE * scale);
     };
 
     fitCanvas();
@@ -608,9 +615,8 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     if (direction === "up") {
       canvas.bringObjectForward(obj);
     } else {
-      // Prevent moving below background
       const idx = canvas.getObjects().indexOf(obj);
-      if (idx > 1) {
+      if (idx > 0) {
         canvas.sendObjectBackwards(obj);
       }
     }
@@ -627,6 +633,11 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     try {
       // Deselect to remove selection handles from export
       canvas.discardActiveObject();
+      // Reset zoom to 1 for full-res export
+      const currentZoom = canvas.getZoom();
+      canvas.setZoom(1);
+      canvas.setWidth(CANVAS_SIZE);
+      canvas.setHeight(CANVAS_SIZE);
       canvas.renderAll();
 
       const dataUrl = canvas.toDataURL({
@@ -634,6 +645,12 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
         quality: 1,
         multiplier: 800 / CANVAS_SIZE,
       });
+
+      // Restore zoom
+      canvas.setZoom(currentZoom);
+      canvas.setWidth(CANVAS_SIZE * currentZoom);
+      canvas.setHeight(CANVAS_SIZE * currentZoom);
+      canvas.renderAll();
 
       if (onSave) {
         await onSave(dataUrl);
@@ -673,7 +690,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
             <div style={styles.layerList}>
               {layers.length === 0 && (
                 <div style={styles.emptyLayers}>
-                  <Text variant="bodySm" tone="subdued">No text layers yet. Add one from the toolbar.</Text>
+                  <Text variant="bodySm" tone="subdued">No layers yet. Add text from the panel.</Text>
                 </div>
               )}
               {layers.map((layer) => (
@@ -687,9 +704,11 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
                   onClick={() => handleSelectLayer(layer.id)}
                 >
                   <div style={styles.layerInfo}>
-                    <Badge tone={layer.visible ? "info" : undefined} size="small">T</Badge>
+                    <Badge tone={layer.visible ? "info" : undefined} size="small">
+                      {layer.object?._isBackground ? "🖼" : "T"}
+                    </Badge>
                     <Text variant="bodySm" as="span" truncate>
-                      {layer.name || "Text layer"}
+                      {layer.name || "Layer"}
                     </Text>
                   </div>
                   <div style={styles.layerActions}>
@@ -733,7 +752,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
           {/* Right Panel — Properties */}
           <div style={styles.rightPanel}>
             <div style={styles.panelHeader}>
-              <Text variant="headingSm" as="h3">Text Properties</Text>
+              <Text variant="headingSm" as="h3">Layer Properties</Text>
             </div>
             <div style={styles.propsContent}>
               <BlockStack gap="300">
