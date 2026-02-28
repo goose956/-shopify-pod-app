@@ -149,6 +149,8 @@ function hexToHsb(hex) {
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /*  CanvasEditor Component                                                    */
 /* ═══════════════════════════════════════════════════════════════════════════ */
+const CANVAS_SIZE = 500; // visual size — export uses multiplier for full res
+
 export function CanvasEditor({ imageUrl, onSave, onClose }) {
   const canvasRef = useRef(null);
   const fabricRef = useRef(null);
@@ -197,8 +199,8 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
     if (!canvasRef.current) return;
 
     const canvas = new fabric.Canvas(canvasRef.current, {
-      width: 800,
-      height: 800,
+      width: CANVAS_SIZE,
+      height: CANVAS_SIZE,
       backgroundColor: "#ffffff",
       selection: true,
       preserveObjectStacking: true,
@@ -238,11 +240,11 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
           return;
         }
         console.log("[CanvasEditor] Image loaded:", img.width, "x", img.height);
-        const scale = Math.min(800 / img.width, 800 / img.height);
+        const scale = Math.min(CANVAS_SIZE / img.width, CANVAS_SIZE / img.height);
         img.scaleX = scale;
         img.scaleY = scale;
-        img.left = (800 - img.width * scale) / 2;
-        img.top = (800 - img.height * scale) / 2;
+        img.left = (CANVAS_SIZE - img.width * scale) / 2;
+        img.top = (CANVAS_SIZE - img.height * scale) / 2;
         img.selectable = false;
         img.evented = false;
         img.hoverCursor = "default";
@@ -524,7 +526,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
       const dataUrl = canvas.toDataURL({
         format: "png",
         quality: 1,
-        multiplier: 1,
+        multiplier: 800 / CANVAS_SIZE,
       });
 
       if (onSave) {
@@ -619,12 +621,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
                 <Text variant="bodySm" tone="subdued">Loading image...</Text>
               </div>
             )}
-            <canvas ref={canvasRef} style={{
-              display: canvasReady ? "block" : "none",
-              maxWidth: "100%",
-              maxHeight: "calc(95vh - 120px)",
-              objectFit: "contain",
-            }} />
+            <canvas ref={canvasRef} style={{ display: canvasReady ? "block" : "none" }} />
           </div>
 
           {/* Right Panel — Properties */}
