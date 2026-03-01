@@ -5,6 +5,8 @@
  * Supports a free tier and a "Pro" paid tier with usage tracking.
  */
 
+const TRIAL_CREDIT_FRACTION = 0.25; // During trial, only 25% of monthly credits are available
+
 const PLANS = {
   free: {
     name: "Free",
@@ -50,12 +52,23 @@ class BillingService {
     // Reset usage if we are in a new billing month
     const usage = this._getCurrentUsage(settings);
 
+    // Determine if shop is currently within the trial window
+    const trialEndsAt = settings.billingTrialEndsAt || null;
+    const isOnTrial = !!(trialEndsAt && new Date(trialEndsAt) > new Date());
+    const trialCreditsLimit = isOnTrial
+      ? Math.floor(plan.creditsPerMonth * TRIAL_CREDIT_FRACTION)
+      : null;
+
+    // Effective limit is the trial cap when on trial, full credits otherwise
+    const effectiveLimit = isOnTrial ? trialCreditsLimit : plan.creditsPerMonth;
+
     return {
       plan: planId,
       planName: plan.name,
       price: plan.price,
       limits: {
         creditsPerMonth: plan.creditsPerMonth,
+        effectiveLimit,
       },
       usage: {
         credits: usage.credits,
@@ -63,7 +76,9 @@ class BillingService {
       },
       subscriptionId: settings.billingSubscriptionId || null,
       subscriptionStatus: settings.billingSubscriptionStatus || null,
-      trialEndsAt: settings.billingTrialEndsAt || null,
+      trialEndsAt,
+      isOnTrial,
+      trialCreditsLimit,
     };
   }
 
@@ -71,13 +86,15 @@ class BillingService {
   canPerformAction(shopDomain, action) {
     const billing = this.getShopBilling(shopDomain);
     const { credits } = billing.usage;
-    const { creditsPerMonth } = billing.limits;
+    const { effectiveLimit, creditsPerMonth } = billing.limits;
 
-    // Every AI generation costs 1 credit — even if not published
+    // During trial the effective limit is 25% of monthly credits
     return {
-      allowed: credits < creditsPerMonth,
+      allowed: credits < effectiveLimit,
       current: credits,
-      limit: creditsPerMonth,
+      limit: effectiveLimit,
+      fullLimit: creditsPerMonth,
+      isOnTrial: billing.isOnTrial,
       action,
     };
   }
@@ -157,10 +174,16 @@ class BillingService {
       throw new Error("Failed to create subscription — no confirmation URL returned.");
     }
 
-    // Store pending subscription info
+    // Store pending subscription info + trial dates
+    const trialEndsAt = plan.trialDays > 0
+      ? new Date(Date.now() + plan.trialDays * 24 * 60 * 60 * 1000).toISOString()
+      : null;
+
     this.settingsRepository.upsertByShop(shopDomain, {
       billingPendingPlan: planId,
       billingSubscriptionId: data.appSubscription?.id || null,
+      billingTrialStartedAt: plan.trialDays > 0 ? new Date().toISOString() : null,
+      billingTrialEndsAt: trialEndsAt,
     });
 
     return {
@@ -228,11 +251,20 @@ class BillingService {
     }
 
     // Calculate trial end date
-    let trialEndsAt = null;
+    const existingSettings = this.settingsRepository.findByShop(shopDomain) || {};
+    let trialEndsAt = existingSettings.billingTrialEndsAt || null;
+
     if (sub.trialDays > 0 && sub.status === "ACTIVE") {
-      // Shopify doesn't directly give trial end date in this query,
-      // so we compute from currentPeriodEnd if needed
-      trialEndsAt = this.settingsRepository.findByShop(shopDomain)?.billingTrialEndsAt || null;
+      // If we have no stored trial end date, compute from trial start or now
+      if (!trialEndsAt) {
+        const trialStart = existingSettings.billingTrialStartedAt
+          ? new Date(existingSettings.billingTrialStartedAt)
+          : new Date();
+        trialEndsAt = new Date(trialStart.getTime() + sub.trialDays * 24 * 60 * 60 * 1000).toISOString();
+      }
+    } else if (sub.trialDays === 0 || !sub.trialDays) {
+      // No trial on this subscription — clear trial dates
+      trialEndsAt = null;
     }
 
     this.settingsRepository.upsertByShop(shopDomain, {
@@ -241,6 +273,7 @@ class BillingService {
       billingSubscriptionStatus: sub.status,
       billingPendingPlan: null,
       billingTrialEndsAt: trialEndsAt,
+      billingTrialStartedAt: existingSettings.billingTrialStartedAt || null,
     });
 
     return {

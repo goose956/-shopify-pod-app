@@ -543,9 +543,13 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     if (billingService) {
       const check = billingService.canPerformAction(session.shopDomain, "design");
       if (!check.allowed) {
+        const msg = check.isOnTrial
+          ? `Trial credit limit reached (${check.current}/${check.limit}). Your full ${check.fullLimit} credits unlock after the trial.`
+          : `Monthly design limit reached (${check.current}/${check.limit}). Upgrade to Pro for more.`;
         return res.status(403).json({
-          error: `Monthly design limit reached (${check.current}/${check.limit}). Upgrade to Pro for more.`,
+          error: msg,
           limitReached: true,
+          isOnTrial: check.isOnTrial || false,
           usage: check,
         });
       }

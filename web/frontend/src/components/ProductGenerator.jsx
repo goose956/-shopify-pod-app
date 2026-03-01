@@ -352,7 +352,10 @@ export function ProductGenerator() {
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         if (data.limitReached) {
-          setError(`You've used all your credits this month. Go to the Billing tab to upgrade or wait for your monthly reset.`);
+          const msg = data.isOnTrial
+            ? `You've reached your trial credit limit. Your full monthly credits will unlock once your 7-day trial ends. Go to the Billing tab for details.`
+            : `You've used all your credits this month. Go to the Billing tab to upgrade or wait for your monthly reset.`;
+          setError(msg);
           return;
         }
         throw new Error(data.error || "Failed to generate design preview.");

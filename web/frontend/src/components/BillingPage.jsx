@@ -222,10 +222,19 @@ export function BillingPage() {
   const currentPlan = billing?.plan || "free";
   const isPaid = currentPlan === "pro" || currentPlan === "gold";
   const creditsUsed = billing?.usage?.credits || 0;
-  const creditsLimit = billing?.limits?.creditsPerMonth || 25;
+  const creditsLimit = billing?.limits?.effectiveLimit || billing?.limits?.creditsPerMonth || 25;
+  const fullCreditsLimit = billing?.limits?.creditsPerMonth || 25;
+  const isOnTrial = billing?.isOnTrial || false;
+  const trialCreditsLimit = billing?.trialCreditsLimit || null;
   const creditPct = Math.min(100, (creditsUsed / creditsLimit) * 100);
   const daysLeft = getDaysUntilReset();
   const creditsRemaining = Math.max(0, creditsLimit - creditsUsed);
+
+  // Calculate days left in trial
+  let trialDaysLeft = 0;
+  if (isOnTrial && billing?.trialEndsAt) {
+    trialDaysLeft = Math.max(0, Math.ceil((new Date(billing.trialEndsAt) - new Date()) / (1000 * 60 * 60 * 24)));
+  }
 
   return (
     <BlockStack gap="400">
@@ -294,8 +303,22 @@ export function BillingPage() {
             </div>
             <span style={{ fontSize: 12, opacity: 0.7 }}>
               Every AI design generation uses 1 credit — even if you don't publish.
-            </span>
-          </div>
+            </span>            {isOnTrial && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: "10px 14px",
+                  background: "rgba(99,179,237,0.15)",
+                  border: "1px solid rgba(99,179,237,0.3)",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              >
+                ⏳ <strong>Trial period — {trialDaysLeft} day{trialDaysLeft !== 1 ? "s" : ""} remaining.</strong>{" "}
+                During your 7-day trial a weekly limit of {trialCreditsLimit} credits is enforced.
+                Once your trial ends and you stay subscribed, your full {fullCreditsLimit} credits/month become available.
+              </div>
+            )}          </div>
 
           {/* Right: days until reset */}
           <div
@@ -328,9 +351,10 @@ export function BillingPage() {
               fontSize: 13,
             }}
           >
-            You've used all your credits this month.{" "}
-            {!isPaid
-              ? "Upgrade to a paid plan for more credits."
+            {isOnTrial
+              ? `You’ve used all ${trialCreditsLimit} trial credits. Your full ${fullCreditsLimit} credits/month unlock when your trial ends in ${trialDaysLeft} day${trialDaysLeft !== 1 ? "s" : ""}.`
+              : !isPaid
+              ? "You've used all your credits this month. Upgrade to a paid plan for more credits."
               : `Your credits reset in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}.`}
           </div>
         )}
