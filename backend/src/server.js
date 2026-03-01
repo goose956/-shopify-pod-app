@@ -24,6 +24,8 @@ const { PrintfulMockupService } = require("./services/printfulMockupService");
 const { createPodRouter } = require("./routes/podRoutes");
 const { createAuthRouter } = require("./routes/authRoutes");
 const { createWebhookRouter } = require("./routes/webhookRoutes");
+const { createBillingRouter } = require("./routes/billingRoutes");
+const { BillingService } = require("./services/billingService");
 
 dotenv.config();
 
@@ -94,9 +96,18 @@ async function createServer() {
   // ── Serve built frontend (no DB needed – register before listen) ──────────
   const frontendDist = path.join(__dirname, "..", "..", "web", "frontend", "dist");
   app.use(express.static(frontendDist));
+
+  // ── Public legal pages (required for Shopify App Store) ───────────────────
+  app.get("/privacy", (_req, res) => {
+    res.sendFile(path.join(__dirname, "..", "pages", "privacy.html"));
+  });
+  app.get("/terms", (_req, res) => {
+    res.sendFile(path.join(__dirname, "..", "pages", "terms.html"));
+  });
+
   // SPA catch-all: serve index.html for any non-API GET request
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health") {
+    if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health" || req.path === "/privacy" || req.path === "/terms") {
       return next();
     }
     res.sendFile(path.join(frontendDist, "index.html"), (err) => {
@@ -149,9 +160,18 @@ async function createServer() {
   const assetStorageService = new AssetStorageService(assetRepository);
   const publishService = new ShopifyPublishService(config, settingsRepository);
   const printfulMockupService = new PrintfulMockupService(uploadsDir);
+  const billingService = new BillingService(settingsRepository, config);
 
   // ── OAuth install/callback ────────────────────────────────────────────────
   app.use(createAuthRouter({ config, authService, settingsRepository }));
+
+  // ── Billing routes ────────────────────────────────────────────────────────
+  app.use("/api/billing", createBillingRouter({
+    authService,
+    billingService,
+    settingsRepository,
+    config,
+  }));
 
   // ── Rate limiting ─────────────────────────────────────────────────────────
   const apiLimiter = rateLimit({
@@ -203,6 +223,7 @@ async function createServer() {
       assetStorageService,
       publishService,
       printfulMockupService,
+      billingService,
       config,
     })
   );

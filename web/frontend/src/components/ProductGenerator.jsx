@@ -28,6 +28,7 @@ import { getSessionToken } from "../utils/sessionToken";
 import { DesignLibrary } from "./DesignLibrary";
 import { AdminDashboard } from "./AdminDashboard";
 import { CanvasEditor } from "./CanvasEditor";
+import { BillingPage } from "./BillingPage";
 
 function buildDefaultLifestylePrompt(productType, index) {
   const defaults = [
@@ -350,6 +351,10 @@ export function ProductGenerator() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
+        if (data.limitReached) {
+          setError(`${data.error} Go to the Billing tab to upgrade.`);
+          return;
+        }
         throw new Error(data.error || "Failed to generate design preview.");
       }
       const data = await response.json();
@@ -467,6 +472,11 @@ export function ProductGenerator() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
+        if (data.limitReached) {
+          setError(`${data.error} Go to the Billing tab to upgrade.`);
+          setIsFinalizing(false);
+          return;
+        }
         const errorDetail = data.error || `Server error (${response.status})`;
         throw new Error(errorDetail);
       }
@@ -595,6 +605,27 @@ export function ProductGenerator() {
           >
             <span style={{ fontSize: 14 }}>{"\u2699\uFE0F"}</span>
             Admin
+          </button>
+          <button
+            onClick={() => setSelectedTab(6)}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: selectedTab === 6 ? 600 : 500,
+              color: selectedTab === 6 ? "#fff" : "#303030",
+              background: selectedTab === 6 ? "#005bd3" : "transparent",
+              border: "none",
+              borderLeft: "1px solid #e3e5e7",
+              cursor: "pointer",
+              transition: "all 0.12s ease",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span style={{ fontSize: 14 }}>{"\uD83D\uDCB3"}</span>
+            Billing
           </button>
         </div>
       </div>
@@ -1481,6 +1512,11 @@ export function ProductGenerator() {
       {/* Tab 6: Admin */}
       {selectedTab === 5 && (
         <AdminDashboard />
+      )}
+
+      {/* Tab 7: Billing */}
+      {selectedTab === 6 && (
+        <BillingPage />
       )}
     </BlockStack>
   );

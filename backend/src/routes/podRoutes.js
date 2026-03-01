@@ -15,7 +15,7 @@ function sanitize(input, maxLength = 2000) {
     .slice(0, maxLength);
 }
 
-function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService, config }) {
+function createPodRouter({ authService, memberAuthService, memberRepository, analyticsService, designRepository, productRepository, settingsRepository, pipelineService, assetStorageService, publishService, printfulMockupService, billingService, config }) {
   const router = express.Router();
   const uploadsDir = config?.storage?.uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
 
@@ -232,6 +232,12 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     const targetShop = String(req.body?.shop || session.shopDomain).trim();
+
+    // Security: only allow resetting own shop's token
+    if (targetShop !== session.shopDomain) {
+      return res.status(403).json({ error: "Cannot reset OAuth for a different shop." });
+    }
+
     const before = settingsRepository.findByShop(targetShop);
 
     // Clear token + scopes but keep other settings
@@ -533,6 +539,18 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
+    // ── Billing enforcement: check design quota ──────────────────────
+    if (billingService) {
+      const check = billingService.canPerformAction(session.shopDomain, "design");
+      if (!check.allowed) {
+        return res.status(403).json({
+          error: `Monthly design limit reached (${check.current}/${check.limit}). Upgrade to Pro for more.`,
+          limitReached: true,
+          usage: check,
+        });
+      }
+    }
+
     const prompt = sanitize(req.body?.prompt, 5000);
     const productType = sanitize(req.body?.productType || "mug", 50).toLowerCase();
     const imageShape = sanitize(req.body?.imageShape || "square", 20).toLowerCase();
@@ -582,6 +600,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         ...design,
         currentDesignAssetId: previewAsset.id,
       });
+
+      // Record usage
+      if (billingService) {
+        billingService.recordUsage(session.shopDomain, "design");
+      }
 
       return res.json({
         designId: savedDesign.id,
@@ -911,6 +934,18 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
+    // ── Billing enforcement: check publish quota ──────────────────────
+    if (billingService) {
+      const check = billingService.canPerformAction(session.shopDomain, "publish");
+      if (!check.allowed) {
+        return res.status(403).json({
+          error: `Monthly publish limit reached (${check.current}/${check.limit}). Upgrade to Pro for more.`,
+          limitReached: true,
+          usage: check,
+        });
+      }
+    }
+
     const designId = String(req.body?.designId || "").trim();
     if (!designId) {
       return res.status(400).json({ error: "designId is required" });
@@ -1143,6 +1178,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             publishImmediately,
             updatedAt: Date.now(),
           });
+
+          // Record publish usage
+          if (billingService) {
+            billingService.recordUsage(session.shopDomain, "publish");
+          }
         } else {
           designRepository.update(designId, {
             status: "finalized",
