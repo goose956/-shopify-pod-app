@@ -739,7 +739,11 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
                 <Text variant="bodySm" tone="subdued">Loading image...</Text>
               </div>
             )}
-            <canvas ref={canvasRef} style={{ display: canvasReady ? "block" : "none" }} />
+            {/* IMPORTANT: Do NOT use display:none on the canvas.
+                Fabric copies the lower canvas cssText to the upper (interaction)
+                canvas. If display:none is set when Fabric inits, the upper canvas
+                stays hidden forever and all mouse events are lost. */}
+            <canvas ref={canvasRef} style={{ opacity: canvasReady ? 1 : 0 }} />
           </div>
 
           {/* Right Panel — Properties */}
