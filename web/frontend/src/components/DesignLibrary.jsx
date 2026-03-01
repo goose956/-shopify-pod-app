@@ -14,10 +14,13 @@ import {
 } from "@shopify/polaris";
 import { DeleteIcon } from "@shopify/polaris-icons";
 import { getSessionToken } from "../utils/sessionToken";
+import JSZip from "jszip";
+import { saveAs } from "file-saver";
 
 function DesignCard({ design, onDelete }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const statusTone = {
     published: "success",
@@ -45,16 +48,94 @@ function DesignCard({ design, onDelete }) {
       })
     : "";
 
-  const handleDownload = () => {
-    if (!design.previewImageUrl) return;
-    const a = document.createElement("a");
-    a.href = design.previewImageUrl;
-    a.download = `design-${design.id}.png`;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      // Fetch all assets for this design
+      const sessionToken = await getSessionToken();
+      const res = await fetch(`/api/designs/${design.id}/assets`, {
+        headers: { "X-Shopify-Session-Token": sessionToken },
+      });
+
+      let assets = [];
+      if (res.ok) {
+        const data = await res.json();
+        assets = data.assets || [];
+      }
+
+      // Collect unique URLs to download (assets + previewImageUrl as fallback)
+      const urlSet = new Map();
+      for (const asset of assets) {
+        if (asset.url && !urlSet.has(asset.url)) {
+          const label = `${asset.type || "image"}-${asset.role || "unknown"}`;
+          urlSet.set(asset.url, label);
+        }
+      }
+      // Ensure the preview image is included even if not in assets
+      if (design.previewImageUrl && !urlSet.has(design.previewImageUrl)) {
+        urlSet.set(design.previewImageUrl, "preview");
+      }
+
+      // Single file — download directly without ZIP
+      if (urlSet.size <= 1) {
+        const url = urlSet.keys().next().value || design.previewImageUrl;
+        if (url) {
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `design-${design.id}.png`;
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+        setDownloading(false);
+        return;
+      }
+
+      // Multiple files — bundle into a ZIP
+      const zip = new JSZip();
+      const nameCount = {};
+
+      for (const [url, label] of urlSet) {
+        try {
+          const imgRes = await fetch(url);
+          if (!imgRes.ok) continue;
+          const blob = await imgRes.blob();
+
+          // Detect extension from content-type or URL
+          const ct = imgRes.headers.get("content-type") || "";
+          let ext = "png";
+          if (ct.includes("jpeg") || ct.includes("jpg")) ext = "jpg";
+          else if (ct.includes("webp")) ext = "webp";
+          else if (url.match(/\.(jpe?g|png|webp)/i)) {
+            ext = url.match(/\.(jpe?g|png|webp)/i)[1].replace("jpeg", "jpg");
+          }
+
+          // Build unique filename
+          const baseName = label.replace(/[^a-zA-Z0-9_-]/g, "_");
+          nameCount[baseName] = (nameCount[baseName] || 0) + 1;
+          const suffix = nameCount[baseName] > 1 ? `-${nameCount[baseName]}` : "";
+          const filename = `${baseName}${suffix}.${ext}`;
+
+          zip.file(filename, blob);
+        } catch (fetchErr) {
+          console.warn(`[Download] Failed to fetch asset: ${url}`, fetchErr);
+        }
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const promptSlug = (design.prompt || "design")
+        .slice(0, 30)
+        .replace(/[^a-zA-Z0-9]/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_|_$/g, "");
+      saveAs(zipBlob, `${promptSlug}-${design.id.slice(0, 8)}.zip`);
+    } catch (err) {
+      console.error("[Download] Error downloading assets:", err);
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -129,8 +210,8 @@ function DesignCard({ design, onDelete }) {
         {/* Actions */}
         <div style={{ marginTop: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
           {design.previewImageUrl && (
-            <Button size="slim" onClick={handleDownload}>
-              Download
+            <Button size="slim" onClick={handleDownload} loading={downloading}>
+              Download All
             </Button>
           )}
           {design.adminUrl && (
