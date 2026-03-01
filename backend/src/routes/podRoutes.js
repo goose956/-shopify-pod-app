@@ -601,9 +601,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         currentDesignAssetId: previewAsset.id,
       });
 
-      // Record usage
+      // Record credit usage
       if (billingService) {
-        billingService.recordUsage(session.shopDomain, "design");
+        billingService.recordUsage(session.shopDomain);
       }
 
       return res.json({
@@ -934,17 +934,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
-    // ── Billing enforcement: check publish quota ──────────────────────
-    if (billingService) {
-      const check = billingService.canPerformAction(session.shopDomain, "publish");
-      if (!check.allowed) {
-        return res.status(403).json({
-          error: `Monthly publish limit reached (${check.current}/${check.limit}). Upgrade to Pro for more.`,
-          limitReached: true,
-          usage: check,
-        });
-      }
-    }
+    // Publishing is free — credits are only consumed on AI generation
 
     const designId = String(req.body?.designId || "").trim();
     if (!designId) {
@@ -1179,10 +1169,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             updatedAt: Date.now(),
           });
 
-          // Record publish usage
-          if (billingService) {
-            billingService.recordUsage(session.shopDomain, "publish");
-          }
+          // Publishing is free — credits are only used for AI generation
         } else {
           designRepository.update(designId, {
             status: "finalized",

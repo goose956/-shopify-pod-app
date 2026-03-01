@@ -352,7 +352,7 @@ export function ProductGenerator() {
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
         if (data.limitReached) {
-          setError(`${data.error} Go to the Billing tab to upgrade.`);
+          setError(`You've used all your credits this month. Go to the Billing tab to upgrade or wait for your monthly reset.`);
           return;
         }
         throw new Error(data.error || "Failed to generate design preview.");
@@ -472,11 +472,6 @@ export function ProductGenerator() {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        if (data.limitReached) {
-          setError(`${data.error} Go to the Billing tab to upgrade.`);
-          setIsFinalizing(false);
-          return;
-        }
         const errorDetail = data.error || `Server error (${response.status})`;
         throw new Error(errorDetail);
       }

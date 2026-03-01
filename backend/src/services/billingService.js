@@ -9,15 +9,13 @@ const PLANS = {
   free: {
     name: "Free",
     price: 0,
-    designsPerMonth: 5,
-    publishesPerMonth: 5,
+    creditsPerMonth: 25,
     trialDays: 0,
   },
   pro: {
     name: "Pro",
     price: 19.99,
-    designsPerMonth: 30,
-    publishesPerMonth: 30,
+    creditsPerMonth: 150,
     trialDays: 7,
   },
 };
@@ -51,12 +49,10 @@ class BillingService {
       planName: plan.name,
       price: plan.price,
       limits: {
-        designsPerMonth: plan.designsPerMonth,
-        publishesPerMonth: plan.publishesPerMonth,
+        creditsPerMonth: plan.creditsPerMonth,
       },
       usage: {
-        designs: usage.designs,
-        publishes: usage.publishes,
+        credits: usage.credits,
         periodStart: usage.periodStart,
       },
       subscriptionId: settings.billingSubscriptionId || null,
@@ -68,38 +64,24 @@ class BillingService {
   /* ── Check if an action is within limits ───────────────────────────── */
   canPerformAction(shopDomain, action) {
     const billing = this.getShopBilling(shopDomain);
-    const limits = billing.limits;
-    const usage = billing.usage;
+    const { credits } = billing.usage;
+    const { creditsPerMonth } = billing.limits;
 
-    if (action === "design") {
-      return {
-        allowed: usage.designs < limits.designsPerMonth,
-        current: usage.designs,
-        limit: limits.designsPerMonth,
-        action,
-      };
-    }
-    if (action === "publish") {
-      return {
-        allowed: usage.publishes < limits.publishesPerMonth,
-        current: usage.publishes,
-        limit: limits.publishesPerMonth,
-        action,
-      };
-    }
-    return { allowed: true, current: 0, limit: Infinity, action };
+    // Every AI generation costs 1 credit — even if not published
+    return {
+      allowed: credits < creditsPerMonth,
+      current: credits,
+      limit: creditsPerMonth,
+      action,
+    };
   }
 
   /* ── Increment usage counter ───────────────────────────────────────── */
-  recordUsage(shopDomain, action) {
+  recordUsage(shopDomain) {
     const settings = this.settingsRepository.findByShop(shopDomain) || {};
     const usage = this._getCurrentUsage(settings);
 
-    if (action === "design") {
-      usage.designs += 1;
-    } else if (action === "publish") {
-      usage.publishes += 1;
-    }
+    usage.credits += 1;
 
     this.settingsRepository.upsertByShop(shopDomain, {
       billingUsage: usage,
@@ -329,7 +311,14 @@ class BillingService {
 
     // Reset if we are in a new period
     if (usage.periodStart !== periodStart) {
-      usage = { designs: 0, publishes: 0, periodStart };
+      usage = { credits: 0, periodStart };
+    }
+
+    // Migration: convert old dual-counter format to unified credits
+    if (typeof usage.credits === "undefined") {
+      usage.credits = (usage.designs || 0) + (usage.publishes || 0);
+      delete usage.designs;
+      delete usage.publishes;
     }
 
     return usage;
