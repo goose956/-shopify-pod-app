@@ -50,7 +50,7 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
     const plan = billingService.getPlan(planId);
 
     if (!plan || plan.price === 0) {
-      return res.status(400).json({ error: "Invalid plan. Use 'pro'." });
+      return res.status(400).json({ error: "Invalid plan. Use 'pro' or 'gold'." });
     }
 
     try {

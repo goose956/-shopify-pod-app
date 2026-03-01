@@ -18,6 +18,12 @@ const PLANS = {
     creditsPerMonth: 150,
     trialDays: 7,
   },
+  gold: {
+    name: "Gold",
+    price: 39.99,
+    creditsPerMonth: 400,
+    trialDays: 7,
+  },
 };
 
 class BillingService {
@@ -214,7 +220,10 @@ class BillingService {
 
     // Determine plan based on price
     let planId = "free";
-    if (parseFloat(price) >= 19) {
+    const priceNum = parseFloat(price);
+    if (priceNum >= 39) {
+      planId = "gold";
+    } else if (priceNum >= 19) {
       planId = "pro";
     }
 
