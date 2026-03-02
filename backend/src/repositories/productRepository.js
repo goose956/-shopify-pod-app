@@ -19,6 +19,12 @@ class ProductRepository {
     const db = this.store.read();
     return db.products.find((item) => item.designId === designId) || null;
   }
+
+  deleteByDesign(designId) {
+    const db = this.store.read();
+    db.products = db.products.filter((item) => item.designId !== designId);
+    this.store.write(db);
+  }
 }
 
 module.exports = {

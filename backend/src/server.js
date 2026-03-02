@@ -156,7 +156,7 @@ async function createServer() {
   const memberRepository = new MemberRepository(store);
 
   // ── GDPR + uninstall webhooks ─────────────────────────────────────────────
-  app.use("/webhooks", createWebhookRouter({ config, settingsRepository, designRepository, memberRepository }));
+  app.use("/webhooks", createWebhookRouter({ config, settingsRepository, designRepository, memberRepository, assetRepository, productRepository, uploadsDir }));
 
   const authService = new AuthService(config);
   const memberAuthService = new MemberAuthService(memberRepository);

@@ -328,10 +328,14 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(401).json({ error: "Invalid or missing Shopify session token" });
     }
 
-    const allMembers = memberRepository.list();
+    // Only show members that belong to this shop (by shopDomain on their designs)
     const allDesigns = designRepository.listByShop(shopSession.shopDomain);
     const published = allDesigns.filter((item) => item.status === "published").length;
     const designCountsByMember = designRepository.countByMember(shopSession.shopDomain);
+
+    // Scope members to only those who have created designs in this shop
+    const shopMemberIds = new Set(Object.keys(designCountsByMember));
+    const allMembers = memberRepository.list().filter((m) => shopMemberIds.has(m.id));
 
     return res.json({
       visitors: analyticsService.getSummary(),
@@ -537,6 +541,19 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
+    // ── Billing enforcement ──────────────────────────────────────────
+    if (billingService) {
+      const check = billingService.canPerformAction(session.shopDomain, "analyze");
+      if (!check.allowed) {
+        return res.status(403).json({
+          error: check.isOnTrial
+            ? `Trial credit limit reached (${check.current}/${check.limit}).`
+            : `Monthly credit limit reached (${check.current}/${check.limit}). Upgrade for more.`,
+          limitReached: true, isOnTrial: check.isOnTrial || false, usage: check,
+        });
+      }
+    }
+
     const imageBase64 = String(req.body?.imageBase64 || "").trim();
     if (!imageBase64) {
       return res.status(400).json({ error: "imageBase64 is required" });
@@ -548,6 +565,10 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         imageBase64,
         openAiApiKey: settings?.openAiApiKey || "",
       });
+
+      // Record credit usage for image analysis
+      if (billingService) billingService.recordUsage(session.shopDomain);
+
       return res.json({ description: result.description });
     } catch (error) {
       return res.status(500).json({
@@ -676,6 +697,19 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
+    // ── Billing enforcement ──────────────────────────────────────────
+    if (billingService) {
+      const check = billingService.canPerformAction(session.shopDomain, "mockup");
+      if (!check.allowed) {
+        return res.status(403).json({
+          error: check.isOnTrial
+            ? `Trial credit limit reached (${check.current}/${check.limit}).`
+            : `Monthly credit limit reached (${check.current}/${check.limit}). Upgrade for more.`,
+          limitReached: true, isOnTrial: check.isOnTrial || false, usage: check,
+        });
+      }
+    }
+
     const designId = String(req.body?.designId || "").trim();
     if (!designId) {
       return res.status(400).json({ error: "designId is required" });
@@ -726,6 +760,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             updatedAt: Date.now(),
           });
 
+          // Record credit usage for Printful mockup
+          if (billingService) billingService.recordUsage(session.shopDomain);
+
           return res.json({
             designId,
             designImageUrl,
@@ -770,6 +807,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         updatedAt: Date.now(),
       });
 
+      // Record credit usage for mockup generation
+      if (billingService) billingService.recordUsage(session.shopDomain);
+
       return res.json({
         designId,
         designImageUrl,
@@ -789,6 +829,19 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const session = await requireSession(req, res);
     if (!session) {
       return;
+    }
+
+    // ── Billing enforcement ──────────────────────────────────────────
+    if (billingService) {
+      const check = billingService.canPerformAction(session.shopDomain, "revision");
+      if (!check.allowed) {
+        return res.status(403).json({
+          error: check.isOnTrial
+            ? `Trial credit limit reached (${check.current}/${check.limit}).`
+            : `Monthly credit limit reached (${check.current}/${check.limit}). Upgrade for more.`,
+          limitReached: true, isOnTrial: check.isOnTrial || false, usage: check,
+        });
+      }
     }
 
     const designId = String(req.body?.designId || "").trim();
@@ -870,6 +923,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         status: "preview_ready",
         updatedAt: Date.now(),
       });
+
+      // Record credit usage for revision
+      if (billingService) billingService.recordUsage(session.shopDomain);
 
       return res.json({
         designId,
@@ -961,7 +1017,18 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
-    // Publishing is free — credits are only consumed on AI generation
+    // ── Billing enforcement ──────────────────────────────────────────
+    if (billingService) {
+      const check = billingService.canPerformAction(session.shopDomain, "finalize");
+      if (!check.allowed) {
+        return res.status(403).json({
+          error: check.isOnTrial
+            ? `Trial credit limit reached (${check.current}/${check.limit}).`
+            : `Monthly credit limit reached (${check.current}/${check.limit}). Upgrade for more.`,
+          limitReached: true, isOnTrial: check.isOnTrial || false, usage: check,
+        });
+      }
+    }
 
     const designId = String(req.body?.designId || "").trim();
     if (!designId) {
@@ -1219,6 +1286,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       if (publishError) {
         providerMessages.push(`Shopify publish skipped: ${publishError}. You can publish later once OAuth is configured.`);
       }
+
+      // Record credit usage for finalize
+      if (billingService) billingService.recordUsage(session.shopDomain);
 
       log.info({ imageCount: lifestyleImages.length, published: !!publishedProduct }, "Finalize complete");
       return res.json({

@@ -1,5 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const log = require("../utils/logger");
 
 /**
@@ -7,7 +9,7 @@ const log = require("../utils/logger");
  * Required for App Store submission.
  * See: https://shopify.dev/docs/apps/webhooks/configuration/mandatory-webhooks
  */
-function createWebhookRouter({ config, settingsRepository, designRepository, memberRepository }) {
+function createWebhookRouter({ config, settingsRepository, designRepository, memberRepository, assetRepository, productRepository, uploadsDir }) {
   const router = express.Router();
 
   // Use raw body for HMAC verification
@@ -123,13 +125,43 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
   function _purgeShopData(shopDomain) {
     if (!shopDomain) return;
 
-    // Delete all designs for this shop
+    // Delete all designs + their assets + products + uploaded files
     if (designRepository) {
       const designs = designRepository.listByShop(shopDomain);
       for (const design of designs) {
+        // Delete associated assets
+        try {
+          const assets = assetRepository ? assetRepository.listByDesign(design.id) : [];
+          // Delete uploaded files referenced by assets
+          for (const asset of assets) {
+            if (asset.url && asset.url.startsWith("/uploads/")) {
+              const filePath = path.join(uploadsDir, path.basename(asset.url));
+              try { fs.unlinkSync(filePath); } catch (_) { /* already deleted */ }
+            }
+          }
+          if (assetRepository) assetRepository.deleteByDesign(design.id);
+        } catch (err) {
+          log.warn({ err: err?.message, designId: design.id }, "Error purging assets");
+        }
+
+        // Delete associated products
+        try {
+          if (productRepository) productRepository.deleteByDesign(design.id);
+        } catch (err) {
+          log.warn({ err: err?.message, designId: design.id }, "Error purging products");
+        }
+
+        // Delete uploaded files referenced by the design itself
+        for (const urlField of ["previewImageUrl", "rawArtworkUrl", "mockupImageUrl"]) {
+          const url = design[urlField];
+          if (url && url.startsWith("/uploads/")) {
+            try { fs.unlinkSync(path.join(uploadsDir, path.basename(url))); } catch (_) { /* ok */ }
+          }
+        }
+
         designRepository.delete(design.id);
       }
-      log.info({ shopDomain, count: designs.length }, "Purged designs");
+      log.info({ shopDomain, count: designs.length }, "Purged designs, assets, products, and files");
     }
 
     // Delete shop settings (API keys, access tokens)
@@ -137,8 +169,6 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
       settingsRepository.deleteByShop(shopDomain);
       log.info({ shopDomain }, "Purged settings");
     }
-
-    // Note: members are global (not shop-scoped), so they are not deleted here.
   }
 
   return router;
