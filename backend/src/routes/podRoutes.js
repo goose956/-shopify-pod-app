@@ -1103,7 +1103,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       }
 
       // ── Step 1b: OpenAI fallback if primary provider failed ─────────────
-      if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai") {
+      if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai" && lifestyleResult.provider !== "stability" && lifestyleResult.provider !== "stability-openai-mixed") {
         try {
           log.debug({}, "Finalize step 1b: trying OpenAI fallback for product images");
           const scenePrompts = requestedLifestylePrompts.length
