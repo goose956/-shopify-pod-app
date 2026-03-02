@@ -129,6 +129,7 @@ class BillingService {
           name: $name
           returnUrl: $returnUrl
           trialDays: $trialDays
+          replacementBehavior: APPLY_IMMEDIATELY
           test: ${process.env.NODE_ENV !== "production" ? "true" : "false"}
           lineItems: $lineItems
         ) {

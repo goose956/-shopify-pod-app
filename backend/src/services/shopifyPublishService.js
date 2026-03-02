@@ -35,7 +35,7 @@ class ShopifyPublishService {
     // 1. Per-shop OAuth token (stored during /auth/callback)
     if (this.settingsRepository) {
       const shopSettings = this.settingsRepository.findByShop(shopDomain);
-      log.debug({ shopDomain, found: Boolean(shopSettings?.shopifyAccessToken), tokenPrefix: shopSettings?.shopifyAccessToken ? shopSettings.shopifyAccessToken.slice(0, 8) + '...' : 'none' }, "Token lookup for shop");
+      log.debug({ shopDomain, hasToken: Boolean(shopSettings?.shopifyAccessToken) }, "Token lookup for shop");
       if (shopSettings?.shopifyAccessToken) {
         return shopSettings.shopifyAccessToken;
       }

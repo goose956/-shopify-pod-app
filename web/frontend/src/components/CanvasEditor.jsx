@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
+  Banner,
   Button,
   Text,
   TextField,
@@ -179,6 +180,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
 
   // UI state
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showStrokeColorPicker, setShowStrokeColorPicker] = useState(false);
   const [canvasReady, setCanvasReady] = useState(false);
@@ -649,8 +651,7 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
         await onSave(dataUrl);
       }
     } catch (err) {
-      console.error("Failed to save canvas:", err);
-      alert("Failed to save image. Please try again.");
+      setSaveError("Failed to save image. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -673,6 +674,14 @@ export function CanvasEditor({ imageUrl, onSave, onClose }) {
             </Button>
           </InlineStack>
         </div>
+
+        {saveError && (
+          <div style={{ padding: "8px 16px" }}>
+            <Banner tone="critical" onDismiss={() => setSaveError(null)}>
+              <p>{saveError}</p>
+            </Banner>
+          </div>
+        )}
 
         <div style={styles.body}>
           {/* Left Panel — Layers */}

@@ -8,12 +8,14 @@ import {
   Card,
   Checkbox,
   Divider,
+  EmptyState,
   Form,
   FormLayout,
   Icon,
   InlineGrid,
   InlineStack,
   Link,
+  Modal,
   Select,
   Text,
   TextField,
@@ -39,16 +41,7 @@ function buildDefaultLifestylePrompt(productType, index) {
   return defaults[index] || `${productType} product image scene variation ${index + 1}`;
 }
 
-function openImageFullSize(url) {
-  if (!url) return;
-  // For data URIs or blob URLs, create a new window with an embedded img tag
-  // since window.open(dataUri) shows blank in most browsers
-  const win = window.open("", "_blank");
-  if (win) {
-    win.document.write(`<!DOCTYPE html><html><head><title>Full Size Image</title><style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#1a1a1a;}img{max-width:100%;max-height:100vh;object-fit:contain;}</style></head><body><img src="${url}" alt="Full size" /></body></html>`);
-    win.document.close();
-  }
-}
+// openImageFullSize is handled via inline modal (no window.open popups in Shopify embedded apps)
 
 function ImagePreviewCard({ imageUrl, label, size = "medium", onOpen }) {
   const [imgError, setImgError] = useState(false);
@@ -150,6 +143,7 @@ export function ProductGenerator() {
   const [setupNeeded, setSetupNeeded] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showWelcome, setShowWelcome] = useState(false);
+  const [fullSizeImageUrl, setFullSizeImageUrl] = useState(null);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [catalogCategories, setCatalogCategories] = useState([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(false);
@@ -655,23 +649,24 @@ export function ProductGenerator() {
         </Banner>
       )}
 
-      {/* Welcome banner for first-time merchants */}
+      {/* Welcome state for first-time merchants */}
       {showWelcome && selectedTab === 0 && (
-        <Banner
-          tone="info"
-          title="Welcome to POD Design Generator!"
-          onDismiss={() => setShowWelcome(false)}
-        >
-          <BlockStack gap="200">
-            <p>Create stunning product listings in 3 simple steps:</p>
-            <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
-              <li><strong>Describe</strong> your design idea or upload a reference image</li>
-              <li><strong>Preview & refine</strong> your AI-generated artwork</li>
-              <li><strong>Publish</strong> directly to your Shopify store</li>
-            </ul>
-            <p style={{ marginTop: 4 }}>Get started by describing your first design below!</p>
-          </BlockStack>
-        </Banner>
+        <Card>
+          <EmptyState
+            heading="Welcome to POD Design Generator!"
+            image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+          >
+            <BlockStack gap="200">
+              <p>Create stunning product listings in 3 simple steps:</p>
+              <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8, textAlign: "left" }}>
+                <li><strong>Describe</strong> your design idea or upload a reference image</li>
+                <li><strong>Preview & refine</strong> your AI-generated artwork</li>
+                <li><strong>Publish</strong> directly to your Shopify store</li>
+              </ol>
+              <p style={{ marginTop: 4 }}>Get started by describing your first design below!</p>
+            </BlockStack>
+          </EmptyState>
+        </Card>
       )}
 
       {/* Tab 1: Describe */}
@@ -686,7 +681,7 @@ export function ProductGenerator() {
             </Text>
           </BlockStack>
         </Card>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
           {/* Left: Manual prompt */}
           <div
             onClick={() => setInputMode("describe")}
@@ -1080,14 +1075,14 @@ export function ProductGenerator() {
                     imageUrl={rawArtworkUrl || designImageUrl}
                     label="Raw Artwork"
                     size="large"
-                    onOpen={() => openImageFullSize(rawArtworkUrl || designImageUrl)}
+                    onOpen={() => setFullSizeImageUrl(rawArtworkUrl || designImageUrl)}
                   />
                   {designImageUrl && (
                     <ImagePreviewCard
                       imageUrl={designImageUrl}
                       label="Product Mockup"
                       size="large"
-                      onOpen={() => openImageFullSize(designImageUrl)}
+                      onOpen={() => setFullSizeImageUrl(designImageUrl)}
                     />
                   )}
                 </InlineStack>
@@ -1286,7 +1281,7 @@ export function ProductGenerator() {
                     imageUrl={imageUrl}
                     label={`Product Image ${index + 1}`}
                     size="medium"
-                    onOpen={() => openImageFullSize(imageUrl)}
+                    onOpen={() => setFullSizeImageUrl(imageUrl)}
                   />
                 ))}
               </div>
@@ -1567,6 +1562,56 @@ export function ProductGenerator() {
       {/* Tab 7: Billing */}
       {selectedTab === 6 && (
         <BillingPage />
+      )}
+
+      {/* Full-size image modal (replaces window.open popup) */}
+      {fullSizeImageUrl && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.85)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+          onClick={() => setFullSizeImageUrl(null)}
+        >
+          <img
+            src={fullSizeImageUrl}
+            alt="Full size preview"
+            style={{
+              maxWidth: "90vw",
+              maxHeight: "90vh",
+              objectFit: "contain",
+              borderRadius: 8,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            onClick={() => setFullSizeImageUrl(null)}
+            style={{
+              position: "absolute",
+              top: 16,
+              right: 16,
+              background: "rgba(255,255,255,0.9)",
+              border: "none",
+              borderRadius: "50%",
+              width: 36,
+              height: 36,
+              fontSize: 18,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ✕
+          </button>
+        </div>
       )}
     </BlockStack>
   );

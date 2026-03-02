@@ -16,6 +16,10 @@ function injectApiKey() {
 
 export default defineConfig({
   plugins: [react(), injectApiKey()],
+  // Strip console.log/warn in production builds (Shopify requirement)
+  esbuild: {
+    drop: process.env.NODE_ENV === "production" ? ["console", "debugger"] : [],
+  },
   server: {
     port: 5173,
     proxy: {

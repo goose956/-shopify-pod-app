@@ -376,7 +376,7 @@ export function BillingPage() {
       </div>
 
       {/* ── Plan Cards ───────────────────────────────────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
         <PlanCard
           name="Free"
           price={0}
@@ -452,7 +452,7 @@ export function BillingPage() {
         }}
       >
         <Text variant="headingSm" as="h3">What uses credits?</Text>
-        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
           {[
             { badge: "1 credit", tone: "attention", text: "Each AI design generation (even if you don't publish)" },
             { badge: "Free", tone: "success", text: "Publishing products to your Shopify store" },

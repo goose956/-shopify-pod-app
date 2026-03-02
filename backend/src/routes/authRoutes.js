@@ -115,7 +115,7 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       }
 
       const tokenData = await tokenResponse.json();
-      log.debug({ scope: tokenData.scope, tokenPrefix: tokenData.access_token?.slice(0, 8) }, "OAuth token response received");
+      log.debug({ scope: tokenData.scope, hasToken: Boolean(tokenData.access_token) }, "OAuth token response received");
       const accessToken = tokenData.access_token;
       const grantedScopes = tokenData.scope || "";
 
@@ -149,11 +149,11 @@ function createAuthRouter({ config, authService, settingsRepository }) {
         log.error({ shop, err: flushErr }, "OAuth flush to PostgreSQL failed");
       }
 
-      log.info({ shop, tokenPrefix: accessToken.slice(0, 8), scopes: grantedScopes }, "OAuth app installed");
+      log.info({ shop, scopes: grantedScopes }, "OAuth app installed");
 
       // Verify it was saved
       const verify = settingsRepository.findByShop(shop);
-      log.debug({ shop, tokenFound: Boolean(verify?.shopifyAccessToken), tokenPrefix: verify?.shopifyAccessToken?.slice(0, 8) }, "OAuth verify save");
+      log.debug({ shop, tokenFound: Boolean(verify?.shopifyAccessToken) }, "OAuth verify save");
 
       // Redirect into embedded app
       const host = Buffer.from(`${shop}/admin`).toString("base64url");

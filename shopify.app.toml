@@ -8,7 +8,7 @@ application_url = "https://shopify-pod-app-production.up.railway.app"
 embedded = true
 
 [access_scopes]
-scopes = "read_products,write_products,read_orders,write_orders"
+scopes = "read_products,write_products"
 
 [auth]
 redirect_urls = [
