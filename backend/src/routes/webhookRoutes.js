@@ -84,7 +84,7 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
   // ── app/uninstalled ────────────────────────────────────────────────────────
   // Shopify sends this immediately when the merchant uninstalls the app.
   // Clean up access tokens and mark shop as uninstalled.
-  router.post("/app/uninstalled", (req, res) => {
+  router.post("/app/uninstalled", async (req, res) => {
     const shopDomain = req.headers["x-shopify-shop-domain"] || req.body?.myshopify_domain || "";
     log.info({ shopDomain }, "app/uninstalled webhook received");
 
