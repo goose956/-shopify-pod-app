@@ -182,6 +182,10 @@ function DesignCard({ design, onDelete }) {
             src={design.previewImageUrl}
             alt={design.prompt}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            onError={(e) => {
+              e.target.style.display = "none";
+              e.target.parentElement.innerHTML = '<span style="color:#8c9196;font-size:13px">Image unavailable</span>';
+            }}
           />
         ) : (
           <Text variant="bodySm" tone="subdued" as="p">

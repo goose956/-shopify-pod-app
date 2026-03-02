@@ -1350,17 +1350,27 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
-    const designs = designRepository.listByShop(session.shopDomain).map((design) => ({
-      id: design.id,
-      prompt: design.prompt,
-      productType: design.productType,
-      status: design.status,
-      previewImageUrl: design.previewImageUrl,
-      adminUrl: design.adminUrl,
-      shopifyProductId: design.shopifyProductId,
-      createdAt: design.createdAt,
-      updatedAt: design.updatedAt,
-    }));
+    const designs = designRepository.listByShop(session.shopDomain).map((design) => {
+      // Validate local preview images still exist on disk (Railway ephemeral FS)
+      let previewUrl = design.previewImageUrl || null;
+      if (previewUrl && previewUrl.startsWith("/uploads/")) {
+        const localPath = path.join(uploadsDir, path.basename(previewUrl));
+        if (!fs.existsSync(localPath)) {
+          previewUrl = null; // File was lost (redeploy / cleanup)
+        }
+      }
+      return {
+        id: design.id,
+        prompt: design.prompt,
+        productType: design.productType,
+        status: design.status,
+        previewImageUrl: previewUrl,
+        adminUrl: design.adminUrl,
+        shopifyProductId: design.shopifyProductId,
+        createdAt: design.createdAt,
+        updatedAt: design.updatedAt,
+      };
+    });
 
     return res.json({ designs });
   });
