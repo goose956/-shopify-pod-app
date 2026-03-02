@@ -1,15 +1,16 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Replace %SHOPIFY_API_KEY% in index.html at build time
+// Replace %SHOPIFY_API_KEY% in index.html at build time (dev only).
+// In Docker/production builds, the key isn't available at build time —
+// the backend server handles runtime injection instead.
 function injectApiKey() {
   return {
     name: "inject-shopify-api-key",
     transformIndexHtml(html) {
-      return html.replace(
-        /%SHOPIFY_API_KEY%/g,
-        process.env.SHOPIFY_API_KEY || ""
-      );
+      const key = process.env.SHOPIFY_API_KEY || "";
+      if (!key) return html; // Leave placeholder for server-side injection
+      return html.replace(/%SHOPIFY_API_KEY%/g, key);
     },
   };
 }

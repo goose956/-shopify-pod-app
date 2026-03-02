@@ -54,7 +54,7 @@ function DesignCard({ design, onDelete }) {
       // Fetch all assets for this design
       const sessionToken = await getSessionToken();
       const res = await fetch(`/api/designs/${design.id}/assets`, {
-        headers: { "X-Shopify-Session-Token": sessionToken },
+        headers: { Authorization: `Bearer ${sessionToken}` },
       });
 
       let assets = [];
@@ -272,9 +272,12 @@ export function DesignLibrary() {
     try {
       const sessionToken = await getSessionToken();
       const res = await fetch("/api/designs", {
-        headers: { "X-Shopify-Session-Token": sessionToken },
+        headers: { Authorization: `Bearer ${sessionToken}` },
       });
-      if (!res.ok) throw new Error("Failed to load designs");
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Failed to load designs (HTTP ${res.status})`);
+      }
       const data = await res.json();
       // Sort newest first
       const sorted = (data.designs || []).sort(
@@ -297,7 +300,7 @@ export function DesignLibrary() {
       const sessionToken = await getSessionToken();
       const res = await fetch(`/api/designs/${designId}`, {
         method: "DELETE",
-        headers: { "X-Shopify-Session-Token": sessionToken },
+        headers: { Authorization: `Bearer ${sessionToken}` },
       });
       if (!res.ok) throw new Error("Failed to delete design");
       setDesigns((prev) => prev.filter((d) => d.id !== designId));
