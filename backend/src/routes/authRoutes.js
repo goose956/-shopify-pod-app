@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const log = require("../utils/logger");
 
 /**
  * Shopify OAuth install + callback routes.
@@ -18,7 +19,7 @@ function createAuthRouter({ config, authService, settingsRepository }) {
     // Flush nonce to Postgres so it survives a restart between
     // redirect → callback (fire-and-forget is fine for nonces)
     settingsRepository.flush().catch((e) =>
-      console.error("[OAuth] Nonce flush error:", e.message)
+      log.error({ err: e }, "OAuth nonce flush error")
     );
   }
 
@@ -109,17 +110,17 @@ function createAuthRouter({ config, authService, settingsRepository }) {
 
       if (!tokenResponse.ok) {
         const errText = await tokenResponse.text();
-        console.error("[OAuth] Token exchange failed:", errText);
+        log.error({ status: tokenResponse.status, body: errText }, "OAuth token exchange failed");
         return res.status(502).send("Token exchange failed.");
       }
 
       const tokenData = await tokenResponse.json();
-      console.log(`[OAuth] Full token response: ${JSON.stringify(tokenData).slice(0, 500)}`);
+      log.debug({ scope: tokenData.scope, tokenPrefix: tokenData.access_token?.slice(0, 8) }, "OAuth token response received");
       const accessToken = tokenData.access_token;
       const grantedScopes = tokenData.scope || "";
 
       if (!accessToken) {
-        console.error("[OAuth] Token exchange returned no access_token:", JSON.stringify(tokenData).slice(0, 300));
+        log.error({ shop, scope: tokenData.scope }, "OAuth token exchange returned no access_token");
         return res.status(502).send("Token exchange returned no access token.");
       }
 
@@ -133,7 +134,7 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       // ── CRITICAL: flush to PostgreSQL BEFORE redirecting ──
       try {
         await settingsRepository.flush();
-        console.log(`[OAuth] Token flushed to PostgreSQL for ${shop}`);
+        log.info({ shop }, "OAuth token flushed to PostgreSQL");
 
         // Double-check: read directly from Postgres to confirm
         if (settingsRepository.store?.pool) {
@@ -141,18 +142,18 @@ function createAuthRouter({ config, authService, settingsRepository }) {
           if (pgResult.rows.length > 0) {
             const pgSettings = pgResult.rows[0].data?.settings || [];
             const match = pgSettings.find(s => s.shopDomain === shop);
-            console.log(`[OAuth] Postgres verify: shop=${shop}, found=${Boolean(match)}, hasToken=${Boolean(match?.shopifyAccessToken)}, scopes=${match?.shopifyScopes || "none"}`);
+            log.debug({ shop, found: Boolean(match), hasToken: Boolean(match?.shopifyAccessToken), scopes: match?.shopifyScopes || "none" }, "OAuth Postgres verify");
           }
         }
       } catch (flushErr) {
-        console.error(`[OAuth] FLUSH FAILED for ${shop}:`, flushErr.message);
+        log.error({ shop, err: flushErr }, "OAuth flush to PostgreSQL failed");
       }
 
-      console.log(`[OAuth] App installed for shop: ${shop}, token prefix: ${accessToken.slice(0, 8)}..., scopes: ${grantedScopes}`);
+      log.info({ shop, tokenPrefix: accessToken.slice(0, 8), scopes: grantedScopes }, "OAuth app installed");
 
       // Verify it was saved
       const verify = settingsRepository.findByShop(shop);
-      console.log(`[OAuth] Verify save: shop=${shop}, tokenFound=${Boolean(verify?.shopifyAccessToken)}, tokenPrefix=${verify?.shopifyAccessToken?.slice(0,8)}...`);
+      log.debug({ shop, tokenFound: Boolean(verify?.shopifyAccessToken), tokenPrefix: verify?.shopifyAccessToken?.slice(0, 8) }, "OAuth verify save");
 
       // Redirect into embedded app
       const host = Buffer.from(`${shop}/admin`).toString("base64url");
@@ -160,7 +161,7 @@ function createAuthRouter({ config, authService, settingsRepository }) {
         `https://${shop}/admin/apps/${config.shopify.apiKey}`
       );
     } catch (err) {
-      console.error("[OAuth] Callback error:", err);
+      log.error({ err }, "OAuth callback error");
       return res.status(500).send("OAuth callback failed.");
     }
   });

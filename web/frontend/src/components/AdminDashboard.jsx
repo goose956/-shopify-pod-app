@@ -257,9 +257,8 @@ export function AdminDashboard() {
         <BlockStack gap="200">
           <Text variant="headingMd" as="h2" fontWeight="semibold">Admin Dashboard</Text>
           <Text variant="bodyMd" tone="subdued" as="p">
-            Configure your API keys, view analytics, and manage team members. You'll need at least one AI provider key
-            (OpenAI or KIE.ai) to generate designs. The Printful key enables the product catalog for realistic mockups.
-            Use the Test buttons to verify your keys are working correctly.
+            App owner configuration. Manage AI provider keys, view usage analytics, and manage team members.
+            Merchants never see this panel — they just use their credits to generate designs.
           </Text>
         </BlockStack>
       </Card>

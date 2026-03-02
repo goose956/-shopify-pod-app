@@ -9,6 +9,7 @@
 
 const path = require("path");
 const fs = require("fs");
+const log = require("../utils/logger");
 
 const PRINTFUL_BASE = "https://api.printful.com";
 
@@ -106,7 +107,7 @@ class PrintfulMockupService {
       );
       if (!printfilesRes.ok) {
         const err = await printfilesRes.json().catch(() => ({}));
-        console.error("[Printful] printfiles error:", err);
+        log.error({ err }, "Printful printfiles error");
         return {
           mockupUrls: [],
           provider: "printful-error",
@@ -151,7 +152,7 @@ class PrintfulMockupService {
         ],
       };
 
-      console.log(`[Printful] Creating mockup task for product ${mapping.productId} (${mapping.label}), variant ${variantId}`);
+      log.info({ productId: mapping.productId, label: mapping.label, variantId }, "Creating Printful mockup task");
       const createRes = await fetch(
         `${PRINTFUL_BASE}/mockup-generator/create-task/${mapping.productId}`,
         {
@@ -163,7 +164,7 @@ class PrintfulMockupService {
 
       if (!createRes.ok) {
         const err = await createRes.json().catch(() => ({}));
-        console.error("[Printful] create-task error:", err);
+        log.error({ err }, "Printful create-task error");
         return {
           mockupUrls: [],
           provider: "printful-error",
@@ -182,7 +183,7 @@ class PrintfulMockupService {
       }
 
       // Step 3: Poll for completion
-      console.log(`[Printful] Polling task: ${taskKey}`);
+      log.debug({ taskKey }, "Polling Printful task");
       const startTime = Date.now();
       while (Date.now() - startTime < maxWaitMs) {
         await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
@@ -216,7 +217,7 @@ class PrintfulMockupService {
             }
           }
 
-          console.log(`[Printful] Mockup complete: ${mockupUrls.length} image(s)`);
+          log.info({ imageCount: mockupUrls.length }, "Printful mockup complete");
           return {
             mockupUrls,
             provider: "printful",
@@ -226,7 +227,7 @@ class PrintfulMockupService {
 
         if (status === "failed") {
           const errMsg = statusData?.result?.error || "Unknown error";
-          console.error("[Printful] Task failed:", errMsg);
+          log.error({ errMsg }, "Printful task failed");
           return {
             mockupUrls: [],
             provider: "printful-failed",
@@ -242,7 +243,7 @@ class PrintfulMockupService {
         providerMessage: `Printful mockup generation timed out after ${maxWaitMs / 1000}s.`,
       };
     } catch (error) {
-      console.error("[Printful] exception:", error?.message);
+      log.error({ err: error?.message }, "Printful exception");
       return {
         mockupUrls: [],
         provider: "printful-exception",
@@ -259,7 +260,7 @@ class PrintfulMockupService {
     try {
       const match = dataUri.match(/^data:([^;]+);base64,(.+)$/s);
       if (!match) {
-        console.warn("[Printful] Could not parse data URI");
+        log.warn({}, "Printful: could not parse data URI");
         return null;
       }
 
@@ -275,7 +276,7 @@ class PrintfulMockupService {
       formData.append("file", blob, filename);
       formData.append("type", "default");
 
-      console.log(`[Printful] Uploading artwork (${(buffer.length / 1024).toFixed(0)} KB) to Printful File Library...`);
+      log.info({ sizeKB: (buffer.length / 1024).toFixed(0) }, "Uploading artwork to Printful File Library");
 
       const res = await fetch(`${PRINTFUL_BASE}/files`, {
         method: "POST",
@@ -285,7 +286,7 @@ class PrintfulMockupService {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.error("[Printful] File upload error:", res.status, err);
+        log.error({ status: res.status, err }, "Printful file upload error");
         return null;
       }
 
@@ -294,14 +295,14 @@ class PrintfulMockupService {
       const url = result?.preview_url || result?.url;
 
       if (url) {
-        console.log(`[Printful] Artwork uploaded (id: ${result?.id}). URL: ${url.substring(0, 100)}...`);
+        log.info({ fileId: result?.id, urlPreview: url.substring(0, 100) }, "Printful artwork uploaded");
       } else {
-        console.warn("[Printful] File uploaded but no URL returned:", JSON.stringify(data).substring(0, 200));
+        log.warn({ responsePreview: JSON.stringify(data).substring(0, 200) }, "Printful file uploaded but no URL returned");
       }
 
       return url || null;
     } catch (error) {
-      console.error("[Printful] File upload exception:", error?.message);
+      log.error({ err: error?.message }, "Printful file upload exception");
       return null;
     }
   }
@@ -329,7 +330,7 @@ class PrintfulMockupService {
       });
 
       if (!res.ok) {
-        console.error(`[Printful Catalog] Failed: ${res.status}`);
+        log.error({ status: res.status }, "Printful catalog fetch failed");
         return { products: [], categories: [], source: "error" };
       }
 
@@ -381,10 +382,10 @@ class PrintfulMockupService {
       this._catalogCategories = categories;
       this._catalogCacheTime = Date.now();
 
-      console.log(`[Printful Catalog] Fetched ${products.length} products in ${categories.length} categories`);
+      log.info({ productCount: products.length, categoryCount: categories.length }, "Printful catalog fetched");
       return { products, categories, source: "api" };
     } catch (err) {
-      console.error("[Printful Catalog] Exception:", err?.message);
+      log.error({ err: err?.message }, "Printful catalog exception");
       return { products: [], categories: [], source: "error" };
     }
   }

@@ -1,4 +1,5 @@
 const { Pool } = require("pg");
+const log = require("../utils/logger");
 
 const INITIAL_STORE = {
   designs: [],
@@ -69,7 +70,7 @@ class PostgresStore {
       const settingsCount = this._cache.settings.filter(s => !s.shopDomain?.startsWith("_nonce:")).length;
       const hasTokens = this._cache.settings.some(s => Boolean(s.shopifyAccessToken));
       this._ready = true;
-      console.log(`[PostgresStore] Connected and initialised. Settings entries: ${settingsCount}, hasTokens: ${hasTokens}`);
+      log.info({ settingsCount, hasTokens }, "PostgresStore connected and initialised");
     } finally {
       client.release();
     }
@@ -110,7 +111,7 @@ class PostgresStore {
 
     // Persist to PostgreSQL (fire and forget — errors are logged)
     this._persist().catch((err) => {
-      console.error("[PostgresStore] Failed to persist:", err.message);
+      log.error({ err: err.message }, "PostgresStore failed to persist");
     });
   }
 

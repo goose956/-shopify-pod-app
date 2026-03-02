@@ -1,6 +1,7 @@
 const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const log = require("../utils/logger");
 
 function saveBase64ToDisk(uploadsDir, base64Data, mimeType = "image/png") {
   try {
@@ -11,10 +12,10 @@ function saveBase64ToDisk(uploadsDir, base64Data, mimeType = "image/png") {
     const filename = `${randomUUID()}.${ext}`;
     const filePath = path.join(uploadsDir, filename);
     fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
-    console.log(`[Image] Saved ${(Buffer.byteLength(base64Data, "base64") / 1024).toFixed(0)}KB image to ${filename}`);
+    log.info({ sizeKB: (Buffer.byteLength(base64Data, "base64") / 1024).toFixed(0), filename }, "Image saved to disk");
     return `/uploads/${filename}`;
   } catch (err) {
-    console.error("[Image] Failed to save base64 to disk:", err?.message);
+    log.error({ err: err?.message }, "Failed to save base64 image to disk");
     return null;
   }
 }
@@ -29,7 +30,7 @@ async function downloadUrlToDisk(uploadsDir, imageUrl) {
     }
     const response = await fetch(imageUrl);
     if (!response.ok) {
-      console.error(`[Image] Failed to download URL (${response.status}): ${imageUrl.slice(0, 80)}...`);
+      log.error({ status: response.status, url: imageUrl.slice(0, 80) }, "Failed to download image URL");
       return null;
     }
     const contentType = response.headers.get("content-type") || "image/png";
@@ -38,10 +39,10 @@ async function downloadUrlToDisk(uploadsDir, imageUrl) {
     const filePath = path.join(uploadsDir, filename);
     const buffer = Buffer.from(await response.arrayBuffer());
     fs.writeFileSync(filePath, buffer);
-    console.log(`[Image] Downloaded ${(buffer.length / 1024).toFixed(0)}KB image to ${filename}`);
+    log.info({ sizeKB: (buffer.length / 1024).toFixed(0), filename }, "Image downloaded to disk");
     return `/uploads/${filename}`;
   } catch (err) {
-    console.error("[Image] Failed to download URL to disk:", err?.message);
+    log.error({ err: err?.message }, "Failed to download URL to disk");
     return null;
   }
 }
@@ -360,7 +361,7 @@ class PodPipelineService {
 
       return { description };
     } catch (err) {
-      console.error("[AnalyzeImage] exception:", err?.message);
+      log.error({ err: err?.message }, "AnalyzeImage exception");
       throw err;
     }
   }
@@ -474,7 +475,7 @@ class PodPipelineService {
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
         const msg = errBody?.error?.message || `OpenAI image generation failed (${response.status})`;
-        console.error("[OpenAI] generateOpenAiImage error:", msg);
+        log.error({ status: response.status, detail: msg }, "OpenAI generateOpenAiImage error");
         return null;
       }
 
@@ -499,7 +500,7 @@ class PodPipelineService {
 
       return null;
     } catch (err) {
-      console.error("[OpenAI] generateOpenAiImage exception:", err?.message);
+      log.error({ err: err?.message }, "OpenAI generateOpenAiImage exception");
       return null;
     }
   }
@@ -517,7 +518,7 @@ class PodPipelineService {
         // Convert data: URI to a Blob directly
         const match = referenceImageUrl.match(/^data:(image\/\w+);base64,(.+)$/);
         if (!match) {
-          console.warn("[OpenAI] generateOpenAiImageEdit: invalid data-URI format");
+          log.warn({}, "OpenAI generateOpenAiImageEdit: invalid data-URI format");
           return null;
         }
         const mimeType = match[1];
@@ -535,7 +536,7 @@ class PodPipelineService {
           imageBlob = new Blob([buffer], { type: mimeType });
           filename = `reference${ext}`;
         } else {
-          console.warn("[OpenAI] generateOpenAiImageEdit: local file not found:", localPath);
+          log.warn({ localPath }, "OpenAI generateOpenAiImageEdit: local file not found");
           return null;
         }
       } else {
@@ -581,7 +582,7 @@ class PodPipelineService {
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        console.error("[OpenAI] generateOpenAiImageEdit error:", errBody?.error?.message || response.status);
+        log.error({ status: response.status, detail: errBody?.error?.message }, "OpenAI generateOpenAiImageEdit error");
         return null;
       }
 
@@ -604,7 +605,7 @@ class PodPipelineService {
 
       return null;
     } catch (err) {
-      console.error("[OpenAI] generateOpenAiImageEdit exception:", err?.message);
+      log.error({ err: err?.message }, "OpenAI generateOpenAiImageEdit exception");
       return null;
     }
   }
@@ -620,7 +621,7 @@ class PodPipelineService {
 
     const hasReferenceImage = Boolean(baseDesignImageUrl);
     const hasStabilityKey = this.isUsableApiKey(stabilityApiKey) && String(stabilityApiKey).length > 10;
-    console.log(`[Lifestyle] Starting generation: productType=${productType}, hasReferenceImage=${hasReferenceImage}, hasStabilityKey=${hasStabilityKey}, referenceIsDataUri=${String(baseDesignImageUrl || "").startsWith("data:")}`);
+    log.info({ productType, hasReferenceImage, hasStabilityKey, referenceIsDataUri: String(baseDesignImageUrl || "").startsWith("data:") }, "Lifestyle generation starting");
 
     const prompts = Array.isArray(lifestylePrompts)
       ? lifestylePrompts.map((item) => String(item || "").trim()).filter(Boolean)
@@ -631,7 +632,7 @@ class PodPipelineService {
     // ── Try Stability AI first (much cheaper: ~$0.003-$0.006 per image) ──
     if (hasStabilityKey && hasReferenceImage && this.stabilityImageService) {
       try {
-        console.log("[Lifestyle] Trying Stability AI for product images (cost-optimised)...");
+        log.info({}, "Trying Stability AI for product images (cost-optimised)");
         const stabilityResult = await this.stabilityImageService.generateProductImages({
           stabilityApiKey: stabilityApiKey,
           productImageRef: baseDesignImageUrl,
@@ -641,7 +642,7 @@ class PodPipelineService {
         });
 
         if (stabilityResult.successCount === stabilityResult.totalCount) {
-          console.log(`[Lifestyle] Stability AI succeeded for all ${stabilityResult.totalCount} images`);
+          log.info({ totalCount: stabilityResult.totalCount }, "Stability AI succeeded for all images");
           return {
             imageUrls: stabilityResult.imageUrls,
             provider: "stability",
@@ -651,7 +652,7 @@ class PodPipelineService {
 
         // Partial success — fill gaps with OpenAI
         if (stabilityResult.successCount > 0) {
-          console.log(`[Lifestyle] Stability AI partial: ${stabilityResult.successCount}/${stabilityResult.totalCount}. Filling gaps with OpenAI...`);
+          log.info({ successCount: stabilityResult.successCount, totalCount: stabilityResult.totalCount }, "Stability AI partial success, filling gaps with OpenAI");
           const mixed = [...stabilityResult.imageUrls];
           for (let i = 0; i < mixed.length; i++) {
             if (!mixed[i] && this.isUsableApiKey(openAiApiKey)) {
@@ -679,9 +680,9 @@ class PodPipelineService {
           };
         }
 
-        console.warn("[Lifestyle] Stability AI failed for all images, falling through to OpenAI...");
+        log.warn({}, "Stability AI failed for all images, falling through to OpenAI");
       } catch (stabErr) {
-        console.warn("[Lifestyle] Stability AI error, falling through to OpenAI:", stabErr?.message);
+        log.warn({ err: stabErr?.message }, "Stability AI error, falling through to OpenAI");
       }
     }
 
@@ -692,17 +693,17 @@ class PodPipelineService {
       for (const prompt of promptsToUse) {
         let imageUrl = null;
         if (baseDesignImageUrl) {
-          console.log(`[Lifestyle] Attempting image edit with reference image for prompt: ${prompt.slice(0, 60)}...`);
+          log.debug({ promptPreview: prompt.slice(0, 60) }, "Attempting image edit with reference image");
           imageUrl = await this.generateOpenAiImageEdit({
             prompt,
             referenceImageUrl: baseDesignImageUrl,
             openAiApiKey,
           });
           if (imageUrl) {
-            console.log(`[Lifestyle] Image edit succeeded — reference design used.`);
+            log.info({}, "Lifestyle image edit succeeded — reference design used");
             usedReferenceImageCount += 1;
           } else {
-            console.warn(`[Lifestyle] Image edit returned null — falling back to generation without reference.`);
+            log.warn({}, "Lifestyle image edit returned null — falling back to generation without reference");
           }
         }
 
@@ -910,7 +911,7 @@ class PodPipelineService {
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        console.error("[ExtractArtwork] error:", errBody?.error?.message || response.status);
+        log.error({ status: response.status, detail: errBody?.error?.message }, "ExtractArtwork error");
         return null;
       }
 
@@ -929,7 +930,7 @@ class PodPipelineService {
 
       return null;
     } catch (err) {
-      console.error("[ExtractArtwork] exception:", err?.message);
+      log.error({ err: err?.message }, "ExtractArtwork exception");
       return null;
     }
   }

@@ -26,6 +26,8 @@ const { createAuthRouter } = require("./routes/authRoutes");
 const { createWebhookRouter } = require("./routes/webhookRoutes");
 const { createBillingRouter } = require("./routes/billingRoutes");
 const { BillingService } = require("./services/billingService");
+const { startUploadsCleaner } = require("./utils/uploadsCleaner");
+const log = require("./utils/logger");
 
 dotenv.config();
 
@@ -95,7 +97,10 @@ async function createServer() {
 
   // ── Serve built frontend (no DB needed – register before listen) ──────────
   const frontendDist = path.join(__dirname, "..", "..", "web", "frontend", "dist");
-  app.use(express.static(frontendDist));
+  app.use(express.static(frontendDist, {
+    // Don't serve index.html from static — we handle it below with API key injection
+    index: false,
+  }));
 
   // ── Public legal pages (required for Shopify App Store) ───────────────────
   app.get("/privacy", (_req, res) => {
@@ -105,42 +110,44 @@ async function createServer() {
     res.sendFile(path.join(__dirname, "..", "pages", "terms.html"));
   });
 
-  // SPA catch-all: serve index.html for any non-API GET request
+  // SPA catch-all: serve index.html for any non-API GET request, injecting the API key
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health" || req.path === "/privacy" || req.path === "/terms") {
       return next();
     }
-    res.sendFile(path.join(frontendDist, "index.html"), (err) => {
-      if (err) next();
+    const indexPath = path.join(frontendDist, "index.html");
+    fs.readFile(indexPath, "utf8", (err, html) => {
+      if (err) return next();
+      const injected = html.replace(/%SHOPIFY_API_KEY%/g, config.shopify.apiKey || "");
+      res.type("html").send(injected);
     });
   });
 
   // ── Start listening IMMEDIATELY so Railway health-checks pass ─────────
   const port = Number(process.env.PORT || 3000);
   const server = app.listen(port, () => {
-    console.log(`Backend listening on port ${port} (initialising…)`);
+    log.info({ port }, "Backend listening (initialising…)");
   });
 
   // ── Data store (PostgreSQL in production, JSON file in dev) ───────────────
   let store;
   try {
     if (config.storage.databaseUrl) {
-      console.log("[Storage] Using PostgreSQL, URL prefix:", config.storage.databaseUrl.slice(0, 25) + "...");
+      log.info({ urlPrefix: config.storage.databaseUrl.slice(0, 25) + "..." }, "Using PostgreSQL");
       store = new PostgresStore(config.storage.databaseUrl);
       await store.waitForReady();
       storeType = "PostgresStore";
     } else {
-      console.log("[Storage] WARNING: DATABASE_URL not set — using ephemeral JSON file:", config.storage.dataFilePath);
-      console.log("[Storage] Data WILL BE LOST on every deploy! Set DATABASE_URL to fix.");
+      log.warn({ path: config.storage.dataFilePath }, "DATABASE_URL not set — using ephemeral JSON file. Data WILL BE LOST on every deploy!");
       store = new JsonStore(config.storage.dataFilePath);
       storeType = "JsonStore";
     }
   } catch (err) {
-    console.error("[FATAL] Database initialisation failed:", err);
+    log.fatal({ err }, "Database initialisation failed");
     process.exit(1);
   }
   dbReady = true;
-  console.log("[Init] DB ready, finishing route setup…");
+  log.info("DB ready, finishing route setup…");
 
   const designRepository = new DesignRepository(store);
   const assetRepository = new AssetRepository(store);
@@ -153,7 +160,7 @@ async function createServer() {
 
   const authService = new AuthService(config);
   const memberAuthService = new MemberAuthService(memberRepository);
-  const analyticsService = new AnalyticsService();
+  const analyticsService = new AnalyticsService(settingsRepository);
   const pipelineService = new PodPipelineService(uploadsDir);
   const stabilityImageService = new StabilityImageService(uploadsDir);
   pipelineService.stabilityImageService = stabilityImageService;
@@ -228,11 +235,14 @@ async function createServer() {
     })
   );
 
-  console.log("[Init] All routes registered — app fully ready.");
+  log.info("All routes registered — app fully ready.");
+
+  // ── Scheduled cleanup of old uploaded files ───────────────────────────────
+  startUploadsCleaner(uploadsDir);
 
   // ── Global error handler ──────────────────────────────────────────────────
   app.use((err, _req, res, _next) => {
-    console.error("[Unhandled Error]", err);
+    log.error({ err }, "Unhandled error");
     res.status(500).json({ error: "Internal server error" });
   });
 

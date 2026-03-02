@@ -1,6 +1,7 @@
 const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const log = require("../utils/logger");
 
 /**
  * StabilityImageService — generates product-in-scene lifestyle images
@@ -37,9 +38,7 @@ class StabilityImageService {
     const filename = `${randomUUID()}.${ext}`;
     const filePath = path.join(this.uploadsDir, filename);
     fs.writeFileSync(filePath, buffer);
-    console.log(
-      `[Stability] Saved ${(buffer.length / 1024).toFixed(0)}KB image → ${filename}`
-    );
+    log.info({ sizeKB: (buffer.length / 1024).toFixed(0), filename }, "Stability image saved");
     return `/uploads/${filename}`;
   }
 
@@ -101,13 +100,13 @@ class StabilityImageService {
     strength = 0.55,
   }) {
     if (!this.isUsableKey(stabilityApiKey)) {
-      console.warn("[Stability] API key missing or invalid");
+      log.warn({}, "Stability API key missing or invalid");
       return null;
     }
 
     const imageBuffer = await this._loadImageBuffer(productImageRef);
     if (!imageBuffer) {
-      console.warn("[Stability] Could not load product image for scene generation");
+      log.warn({}, "Stability could not load product image for scene generation");
       return null;
     }
 
@@ -150,9 +149,7 @@ class StabilityImageService {
       formData.append("mode", "image-to-image");
       formData.append("output_format", "png");
 
-      console.log(
-        `[Stability] SD3 img2img request: prompt="${scenePrompt.slice(0, 80)}..." strength=${strength}`
-      );
+      log.info({ prompt: scenePrompt.slice(0, 80), strength }, "Stability SD3 img2img request");
 
       const response = await fetch(
         "https://api.stability.ai/v2beta/stable-image/generate/sd3",
@@ -168,21 +165,19 @@ class StabilityImageService {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        console.warn(
-          `[Stability] SD3 img2img failed (${response.status}): ${errText.slice(0, 200)}`
-        );
+        log.warn({ status: response.status, errText: errText.slice(0, 200) }, "Stability SD3 img2img failed");
         return null;
       }
 
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length < 1000) {
-        console.warn("[Stability] SD3 returned suspiciously small image, skipping");
+        log.warn({ size: buffer.length }, "Stability SD3 returned suspiciously small image, skipping");
         return null;
       }
 
       return this._saveToDisk(buffer, "png");
     } catch (err) {
-      console.warn("[Stability] SD3 img2img exception:", err?.message);
+      log.warn({ err: err?.message }, "Stability SD3 img2img exception");
       return null;
     }
   }
@@ -213,9 +208,7 @@ class StabilityImageService {
       formData.append("samples", "1");
       formData.append("steps", "30");
 
-      console.log(
-        `[Stability] SDXL img2img request: prompt="${scenePrompt.slice(0, 80)}..."`
-      );
+      log.info({ prompt: scenePrompt.slice(0, 80) }, "Stability SDXL img2img request");
 
       const response = await fetch(
         "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/image-to-image",
@@ -231,23 +224,21 @@ class StabilityImageService {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        console.warn(
-          `[Stability] SDXL img2img failed (${response.status}): ${errText.slice(0, 200)}`
-        );
+        log.warn({ status: response.status, errText: errText.slice(0, 200) }, "Stability SDXL img2img failed");
         return null;
       }
 
       const payload = await response.json();
       const b64 = payload?.artifacts?.[0]?.base64;
       if (!b64) {
-        console.warn("[Stability] SDXL returned no image data");
+        log.warn({}, "Stability SDXL returned no image data");
         return null;
       }
 
       const buffer = Buffer.from(b64, "base64");
       return this._saveToDisk(buffer, "png");
     } catch (err) {
-      console.warn("[Stability] SDXL img2img exception:", err?.message);
+      log.warn({ err: err?.message }, "Stability SDXL img2img exception");
       return null;
     }
   }

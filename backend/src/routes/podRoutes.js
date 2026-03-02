@@ -2,6 +2,7 @@
 const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const log = require("../utils/logger");
 
 /**
  * Sanitize user input: strip HTML tags and limit length.
@@ -32,10 +33,10 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       const filename = `${randomUUID()}.${ext}`;
       const filePath = path.join(uploadsDir, filename);
       fs.writeFileSync(filePath, Buffer.from(await resp.arrayBuffer()));
-      console.log(`[Finalize] Persisted external image to ${filename}`);
+      log.info({ filename }, "Persisted external image to local uploads");
       return `/uploads/${filename}`;
     } catch (err) {
-      console.error("[Finalize] Failed to persist image URL:", err?.message);
+      log.error({ err: err?.message, imageUrl }, "Failed to persist image URL");
       return imageUrl;
     }
   }
@@ -92,7 +93,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
   }
 
   // ── Verify token scopes against Shopify API directly ────────────────────
+  // PRODUCTION GUARD: disabled in production to prevent token/scope leakage
   router.get("/verify-scopes", async (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ error: "Not available in production" });
+    }
     const session = await resolveSession(req);
     if (!session?.shopDomain) {
       return res.status(401).json({ error: "No session" });
@@ -129,7 +134,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
   });
 
   // ── Debug: check OAuth token status for current session ─────────────────
+  // PRODUCTION GUARD: disabled in production to prevent internal state leakage
   router.get("/debug-auth", async (req, res) => {
+    if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ error: "Not available in production" });
+    }
     const session = await resolveSession(req);
     if (!session?.shopDomain) {
       return res.status(401).json({ error: "No session" });
@@ -188,9 +197,16 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
   // ── Manual token set (requires SETUP_SECRET) ──────────────────────────────
   router.post("/set-shopify-token", async (req, res) => {
+    // SECURITY: This endpoint requires SETUP_SECRET authentication.
+    // Only the setup-admin identity (authenticated via SETUP_SECRET) may set tokens.
     const session = await resolveSession(req);
     if (!session?.shopDomain) {
       return res.status(401).json({ error: "No session" });
+    }
+
+    // Reject unless authenticated via SETUP_SECRET
+    if (session.subject !== "setup-admin") {
+      return res.status(403).json({ error: "This endpoint requires SETUP_SECRET authentication" });
     }
 
     const { shop, token } = req.body || {};
@@ -209,9 +225,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     // Flush to Postgres so it survives restarts
     try {
       await settingsRepository.flush();
-      console.log(`[set-token] Token flushed to PostgreSQL for ${targetShop}`);
+      log.info({ shop: targetShop }, "Token flushed to PostgreSQL");
     } catch (flushErr) {
-      console.error(`[set-token] FLUSH FAILED for ${targetShop}:`, flushErr.message);
+      log.error({ shop: targetShop, err: flushErr.message }, "Token flush to PostgreSQL FAILED");
     }
 
     // Verify
@@ -249,7 +265,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     try {
       await settingsRepository.flush();
     } catch (e) {
-      console.error("[reset-oauth] flush error:", e.message);
+      log.error({ err: e.message }, "reset-oauth flush error");
     }
 
     const oauthUrl = `https://${config.shopify.hostName.replace(/^https?:\/\//, "")}/auth?shop=${encodeURIComponent(targetShop)}`;
@@ -345,17 +361,23 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     }
 
     const settings = getEffectiveSettings(session.shopDomain);
+    const isAdmin = session.subject === "setup-admin";
     return res.json({
       imageProviderDefault: "openai",
-      keiAiApiKey: maskKey(settings.keiAiApiKey),
-      openAiApiKey: maskKey(settings.openAiApiKey),
-      kieGenerateUrl: settings.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
-      kieEditUrl: settings.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
-      printfulApiKey: maskKey(settings.printfulApiKey),
+      // Only expose masked keys to admin users
+      ...(isAdmin ? {
+        keiAiApiKey: maskKey(settings.keiAiApiKey),
+        openAiApiKey: maskKey(settings.openAiApiKey),
+        kieGenerateUrl: settings.kieGenerateUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+        kieEditUrl: settings.kieEditUrl || "https://api.kie.ai/api/v1/gpt4o-image/generate",
+        printfulApiKey: maskKey(settings.printfulApiKey),
+      } : {}),
       // Tell the frontend which keys are configured (without exposing them)
       hasOpenAiKey: Boolean(settings.openAiApiKey),
       hasKeiAiKey: Boolean(settings.keiAiApiKey),
       hasPrintfulKey: Boolean(settings.printfulApiKey),
+      hasShopifyToken: Boolean(settings.shopifyAccessToken),
+      isAdmin,
       updatedAt: settings.updatedAt || null,
     });
   });
@@ -411,6 +433,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       hasOpenAiKey: Boolean(settings.openAiApiKey),
       hasKeiAiKey: Boolean(settings.keiAiApiKey),
       hasPrintfulKey: Boolean(settings.printfulApiKey),
+      hasShopifyToken: Boolean(settings.shopifyAccessToken),
       updatedAt: settings.updatedAt,
     });
   });
@@ -641,7 +664,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       const catalog = await printfulMockupService.getProductCatalog(settings.printfulApiKey);
       return res.json(catalog);
     } catch (error) {
-      console.error("[Catalog] Error:", error?.message);
+      log.error({ err: error?.message }, "Failed to fetch product catalog");
       return res.status(500).json({ error: "Failed to fetch product catalog" });
     }
   });
@@ -675,7 +698,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
       // Try Printful first (free, professional mockups)
       if (printfulMockupService && settings?.printfulApiKey) {
-        console.log(`[Mockup] Trying Printful for ${design.productType}${printfulProductId ? ` (Printful #${printfulProductId})` : ""}...`);
+        log.info({ productType: design.productType, printfulProductId: printfulProductId || undefined }, "Trying Printful for mockup generation");
         const printfulResult = await printfulMockupService.generateMockup({
           printfulApiKey: settings.printfulApiKey,
           artworkUrl: rawArtworkUrl,
@@ -713,7 +736,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             },
           });
         }
-        console.log(`[Mockup] Printful unavailable: ${printfulResult.providerMessage}. Falling back to AI.`);
+        log.warn({ providerMessage: printfulResult.providerMessage }, "Printful unavailable, falling back to AI");
       }
 
       // Fallback: AI-generated mockup
@@ -896,7 +919,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       fs.writeFileSync(filePath, buffer);
 
       const editedUrl = `/uploads/${filename}`;
-      console.log(`[CanvasEditor] Saved edited artwork → ${filename} (${(buffer.length / 1024).toFixed(1)} KB)`);
+      log.info({ filename, sizeKB: (buffer.length / 1024).toFixed(1) }, "Saved edited artwork from canvas editor");
 
       // Save as asset
       const editedAsset = assetStorageService.saveAsset({
@@ -925,7 +948,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         message: "Edited artwork saved successfully",
       });
     } catch (error) {
-      console.error("[CanvasEditor] Save error:", error);
+      log.error({ err: error?.message || error }, "Canvas editor save error");
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to save edited artwork",
       });
@@ -973,18 +996,22 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           .filter(Boolean)
       : [];
 
+    // Optional pricing — merchant can set price or leave blank
+    const price = req.body?.price ? String(req.body.price).trim() : null;
+    const compareAtPrice = req.body?.compareAtPrice ? String(req.body.compareAtPrice).trim() : null;
+
     try {
-      console.log(`[Finalize] Starting for designId=${designId}, shop=${session.shopDomain}, productType=${design.productType}`);
+      log.info({ designId, shop: session.shopDomain, productType: design.productType }, "Finalize starting");
       const settings = getEffectiveSettings(session.shopDomain);
       const hasOpenAi = Boolean(settings?.openAiApiKey && settings.openAiApiKey.length > 5);
       const hasKie = Boolean(settings?.keiAiApiKey && settings.keiAiApiKey.length > 5);
       const hasStability = Boolean(settings?.stabilityApiKey && settings.stabilityApiKey.length > 10);
-      console.log(`[Finalize] API keys — OpenAI: ${hasOpenAi}, KIE: ${hasKie}, Stability: ${hasStability}`);
+      log.debug({ hasOpenAi, hasKie, hasStability }, "Finalize API key availability");
 
       // ── Step 1: Generate product images ─────────────────────────────────
       let lifestyleResult;
       try {
-        console.log("[Finalize] Step 1: Generating product images...");
+        log.debug({}, "Finalize step 1: generating product images");
         lifestyleResult = await pipelineService.generateLifestyleImages({
           productType: design.productType,
           baseDesignImageUrl: design.previewImageUrl,
@@ -997,9 +1024,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           maxWaitMs: 30000,
           pollIntervalMs: 2500,
         });
-        console.log(`[Finalize] Step 1 result: provider=${lifestyleResult.provider}, images=${lifestyleResult.imageUrls?.length || 0}`);
+        log.info({ provider: lifestyleResult.provider, imageCount: lifestyleResult.imageUrls?.length || 0 }, "Finalize step 1 complete");
       } catch (imgErr) {
-        console.error("[Finalize] Step 1 failed:", imgErr?.message, imgErr?.stack);
+        log.error({ err: imgErr?.message, stack: imgErr?.stack }, "Finalize step 1 failed");
         // Provide fallback so the rest of finalize can still complete
         lifestyleResult = {
           imageUrls: [`https://via.placeholder.com/1024?text=${encodeURIComponent(design.productType + " product image")}`],
@@ -1011,7 +1038,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       // ── Step 1b: OpenAI fallback if primary provider failed ─────────────
       if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai") {
         try {
-          console.log("[Finalize] Step 1b: Trying OpenAI fallback for product images...");
+          log.debug({}, "Finalize step 1b: trying OpenAI fallback for product images");
           const scenePrompts = requestedLifestylePrompts.length
             ? requestedLifestylePrompts
             : [
@@ -1050,9 +1077,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
               providerMessage: `KIE unavailable. Used OpenAI image generation for product scenes. Previous message: ${lifestyleResult.providerMessage}`,
             };
           }
-          console.log(`[Finalize] Step 1b result: provider=${lifestyleResult.provider}, images=${lifestyleResult.imageUrls?.length || 0}`);
+          log.info({ provider: lifestyleResult.provider, imageCount: lifestyleResult.imageUrls?.length || 0 }, "Finalize step 1b complete");
         } catch (fallbackErr) {
-          console.error("[Finalize] Step 1b fallback failed:", fallbackErr?.message);
+          log.error({ err: fallbackErr?.message }, "Finalize step 1b fallback failed");
         }
       }
       const lifestyleImages = lifestyleResult.imageUrls || [];
@@ -1063,7 +1090,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           lifestyleImages[i] = await persistImageUrl(lifestyleImages[i]);
         }
       } catch (persistErr) {
-        console.error("[Finalize] Image persistence warning:", persistErr?.message);
+        log.warn({ err: persistErr?.message }, "Image persistence warning");
       }
 
       // ── Step 2: Transparent artwork ─────────────────────────────────────
@@ -1095,22 +1122,22 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           }
         }
       } catch (artworkErr) {
-        console.error("[Finalize] Step 2 extractArtwork error (non-fatal):", artworkErr?.message);
+        log.warn({ err: artworkErr?.message }, "Finalize step 2 extractArtwork error (non-fatal)");
       }
 
       // ── Step 3: Generate listing copy ───────────────────────────────────
       let listingCopy;
       try {
-        console.log("[Finalize] Step 3: Generating listing copy...");
+        log.debug({}, "Finalize step 3: generating listing copy");
         const listingCopyResult = await pipelineService.generateListingCopy({
           prompt: design.prompt,
           productType: design.productType,
           openAiApiKey: settings?.openAiApiKey || "",
         });
         listingCopy = listingCopyResult.copy;
-        console.log(`[Finalize] Step 3 result: provider=${listingCopyResult.provider}`);
+        log.info({ provider: listingCopyResult.provider }, "Finalize step 3 complete");
       } catch (copyErr) {
-        console.error("[Finalize] Step 3 listing copy error (using fallback):", copyErr?.message);
+        log.error({ err: copyErr?.message }, "Finalize step 3 listing copy error (using fallback)");
         listingCopy = {
           title: `${design.productType.toUpperCase()} - ${design.prompt.slice(0, 45)}`,
           descriptionHtml: `<p>${design.prompt}</p>`,
@@ -1132,14 +1159,14 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           });
         }
       } catch (assetErr) {
-        console.error("[Finalize] Step 4 asset save error (non-fatal):", assetErr?.message);
+        log.warn({ err: assetErr?.message }, "Finalize step 4 asset save error (non-fatal)");
       }
 
       // ── Step 5: Shopify publish (non-fatal) ─────────────────────────────
       let publishedProduct = null;
       let publishError = null;
       try {
-        console.log("[Finalize] Step 5: Publishing to Shopify...");
+        log.debug({}, "Finalize step 5: publishing to Shopify");
         publishedProduct = await publishService.publish({
           shopDomain: session.shopDomain,
           title: listingCopy.title,
@@ -1147,9 +1174,12 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           tags: listingCopy.tags,
           imageUrls: [design.previewImageUrl, ...lifestyleImages],
           publishImmediately,
+          price,
+          compareAtPrice,
+          productType: design.productType,
         });
       } catch (pubErr) {
-        console.error("[Finalize] Step 5 Shopify publish failed (non-fatal):", pubErr?.message);
+        log.error({ err: pubErr?.message }, "Finalize step 5 Shopify publish failed (non-fatal)");
         publishError = pubErr?.message || "Shopify publish failed";
       }
 
@@ -1182,7 +1212,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           });
         }
       } catch (statusErr) {
-        console.error("[Finalize] Step 6 status update error (non-fatal):", statusErr?.message);
+        log.warn({ err: statusErr?.message }, "Finalize step 6 status update error (non-fatal)");
       }
 
       const providerMessages = [lifestyleResult.providerMessage];
@@ -1190,7 +1220,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         providerMessages.push(`Shopify publish skipped: ${publishError}. You can publish later once OAuth is configured.`);
       }
 
-      console.log(`[Finalize] Complete — images=${lifestyleImages.length}, published=${!!publishedProduct}`);
+      log.info({ imageCount: lifestyleImages.length, published: !!publishedProduct }, "Finalize complete");
       return res.json({
         productId: publishedProduct?.productId || null,
         adminUrl: publishedProduct?.adminUrl || null,
@@ -1209,7 +1239,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         },
       });
     } catch (error) {
-      console.error("[Finalize] FATAL Error:", error?.message || error, error?.stack);
+      log.error({ err: error?.message || error, stack: error?.stack }, "Finalize FATAL error");
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to finalize product",
       });
@@ -1267,6 +1297,10 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       };
     }
 
+    // Optional pricing from request
+    const retryPrice = req.body?.price ? String(req.body.price).trim() : null;
+    const retryCompareAtPrice = req.body?.compareAtPrice ? String(req.body.compareAtPrice).trim() : null;
+
     try {
       const publishedProduct = await publishService.publish({
         shopDomain: session.shopDomain,
@@ -1275,6 +1309,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         tags: listingCopy.tags,
         imageUrls,
         publishImmediately,
+        price: retryPrice,
+        compareAtPrice: retryCompareAtPrice,
+        productType: design.productType,
       });
 
       designRepository.update(designId, {
@@ -1298,7 +1335,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         adminUrl: publishedProduct.adminUrl,
       });
     } catch (pubErr) {
-      console.error("[RetryPublish] Failed:", pubErr?.message);
+      log.error({ err: pubErr?.message }, "Retry publish failed");
       return res.json({
         productId: null,
         adminUrl: null,

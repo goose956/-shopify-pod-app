@@ -1,5 +1,13 @@
+const log = require("../utils/logger");
+
+const PERSIST_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 class AnalyticsService {
-  constructor() {
+  /**
+   * @param {object} [settingsRepository] — if provided, analytics are persisted to the store
+   */
+  constructor(settingsRepository) {
+    this._settingsRepo = settingsRepository || null;
     this.startedAt = Date.now();
     this.totalRequests = 0;
     this.uniqueVisitors = new Set();
@@ -19,6 +27,15 @@ class AnalyticsService {
       "openai:gpt-4o-mini:chat":  0.00015,
       "kie:image":                0.03,
     };
+
+    // Restore persisted cumulative counters
+    this._restore();
+
+    // Periodically persist cumulative counters
+    if (this._settingsRepo) {
+      this._persistTimer = setInterval(() => this._persist(), PERSIST_INTERVAL_MS);
+      this._persistTimer.unref();
+    }
   }
 
   buildVisitorId(req) {
@@ -68,7 +85,7 @@ class AnalyticsService {
     return {
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       totalRequests: this.totalRequests,
-      uniqueVisitors: this.uniqueVisitors.size,
+      uniqueVisitors: this.uniqueVisitors.size + (this._restoredVisitorCount || 0),
       last24h,
       last1h,
       topPaths,
@@ -159,6 +176,54 @@ class AnalyticsService {
       ),
       breakdown,
     };
+  }
+
+  /**
+   * Persist cumulative counters to the data store so they survive restarts.
+   * Stores under the special shop domain "_analytics".
+   */
+  _persist() {
+    if (!this._settingsRepo) return;
+    try {
+      const snapshot = {
+        totalRequests: this.totalRequests,
+        uniqueVisitorCount: this.uniqueVisitors.size,
+        pathCounts: Object.fromEntries(this.pathCounts),
+        apiCalls: this.apiCalls.slice(-500), // keep last 500 for cost summary
+        savedAt: Date.now(),
+      };
+      this._settingsRepo.upsertByShop("_analytics", { analyticsSnapshot: snapshot });
+      // Don't flush on every persist — the normal write cycle handles it
+    } catch (err) {
+      log.warn({ err: err?.message }, "Failed to persist analytics snapshot");
+    }
+  }
+
+  /**
+   * Restore cumulative counters from the data store on startup.
+   */
+  _restore() {
+    if (!this._settingsRepo) return;
+    try {
+      const record = this._settingsRepo.findByShop("_analytics");
+      const snap = record?.analyticsSnapshot;
+      if (!snap) return;
+
+      this.totalRequests = snap.totalRequests || 0;
+      // We can't restore the actual Set from a count, but we can set a baseline
+      this._restoredVisitorCount = snap.uniqueVisitorCount || 0;
+      if (snap.pathCounts) {
+        for (const [k, v] of Object.entries(snap.pathCounts)) {
+          this.pathCounts.set(k, v);
+        }
+      }
+      if (Array.isArray(snap.apiCalls)) {
+        this.apiCalls = snap.apiCalls;
+      }
+      log.info({ totalRequests: this.totalRequests, apiCalls: this.apiCalls.length }, "Restored analytics from DB");
+    } catch (err) {
+      log.warn({ err: err?.message }, "Failed to restore analytics snapshot");
+    }
   }
 }
 

@@ -1,4 +1,5 @@
 const express = require("express");
+const log = require("../utils/logger");
 
 /**
  * Billing API routes — plan management, subscription create/cancel, usage info.
@@ -33,7 +34,7 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
       // Sync with Shopify to get latest subscription status
       await billingService.syncSubscriptionStatus(session.shopDomain);
     } catch (err) {
-      console.warn("[Billing] Failed to sync subscription status:", err.message);
+      log.warn({ err: err.message }, "Failed to sync subscription status");
       // Continue — show cached data
     }
 
@@ -68,7 +69,7 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
         subscriptionId: result.subscriptionId,
       });
     } catch (err) {
-      console.error("[Billing] Subscribe error:", err.message);
+      log.error({ err: err.message }, "Subscribe error");
       res.status(500).json({ error: err.message });
     }
   });
@@ -88,7 +89,7 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
         billing: billingService.getShopBilling(session.shopDomain),
       });
     } catch (err) {
-      console.error("[Billing] Confirm error:", err.message);
+      log.error({ err: err.message }, "Confirm error");
       res.status(500).json({ error: err.message });
     }
   });
@@ -108,7 +109,7 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
         billing: billingService.getShopBilling(session.shopDomain),
       });
     } catch (err) {
-      console.error("[Billing] Cancel error:", err.message);
+      log.error({ err: err.message }, "Cancel error");
       res.status(500).json({ error: err.message });
     }
   });
@@ -129,7 +130,7 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
         billing: billingService.getShopBilling(session.shopDomain),
       });
     } catch (err) {
-      console.error("[Billing] Downgrade error:", err.message);
+      log.error({ err: err.message }, "Downgrade error");
       res.status(500).json({ error: err.message });
     }
   });

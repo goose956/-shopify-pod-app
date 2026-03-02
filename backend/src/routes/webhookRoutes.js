@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const log = require("../utils/logger");
 
 /**
  * Shopify mandatory GDPR webhook handlers + APP_UNINSTALLED.
@@ -50,9 +51,7 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
   // ── customers/data_request ─────────────────────────────────────────────────
   router.post("/customers/data_request", (req, res) => {
     const { shop_domain, customer } = req.body;
-    console.log(
-      `[GDPR] customers/data_request from ${shop_domain} for customer ${customer?.id}`
-    );
+    log.info({ shop_domain, customerId: customer?.id }, "GDPR customers/data_request");
     // This app does not store customer personal data.
     return res.status(200).json({ received: true });
   });
@@ -60,9 +59,7 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
   // ── customers/redact ───────────────────────────────────────────────────────
   router.post("/customers/redact", (req, res) => {
     const { shop_domain, customer } = req.body;
-    console.log(
-      `[GDPR] customers/redact from ${shop_domain} for customer ${customer?.id}`
-    );
+    log.info({ shop_domain, customerId: customer?.id }, "GDPR customers/redact");
     // This app does not store customer personal data.
     return res.status(200).json({ received: true });
   });
@@ -72,13 +69,13 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
   // Delete ALL data associated with this shop from the database.
   router.post("/shop/redact", (req, res) => {
     const { shop_domain } = req.body;
-    console.log(`[GDPR] shop/redact for ${shop_domain} — purging all shop data`);
+    log.info({ shop_domain }, "GDPR shop/redact — purging all shop data");
 
     try {
       _purgeShopData(shop_domain);
-      console.log(`[GDPR] shop/redact complete for ${shop_domain}`);
+      log.info({ shop_domain }, "GDPR shop/redact complete");
     } catch (err) {
-      console.error(`[GDPR] shop/redact error for ${shop_domain}:`, err?.message);
+      log.error({ shop_domain, err: err?.message }, "GDPR shop/redact error");
     }
 
     return res.status(200).json({ received: true });
@@ -89,7 +86,7 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
   // Clean up access tokens and mark shop as uninstalled.
   router.post("/app/uninstalled", (req, res) => {
     const shopDomain = req.headers["x-shopify-shop-domain"] || req.body?.myshopify_domain || "";
-    console.log(`[Webhook] app/uninstalled for ${shopDomain}`);
+    log.info({ shopDomain }, "app/uninstalled webhook received");
 
     try {
       // Revoke stored access token immediately
@@ -101,11 +98,19 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
             shopifyScopes: "",
             uninstalledAt: Date.now(),
           });
-          console.log(`[Webhook] Revoked access token for ${shopDomain}`);
+          log.info({ shopDomain }, "Revoked access token");
+
+          // Persist to Postgres so revocation survives restarts
+          try {
+            await settingsRepository.flush();
+            log.info({ shopDomain }, "Token revocation flushed to Postgres");
+          } catch (flushErr) {
+            log.error({ shopDomain, err: flushErr?.message }, "Flush failed after token revocation");
+          }
         }
       }
     } catch (err) {
-      console.error(`[Webhook] app/uninstalled error:`, err?.message);
+      log.error({ err: err?.message }, "app/uninstalled error");
     }
 
     return res.status(200).json({ received: true });
@@ -124,13 +129,13 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
       for (const design of designs) {
         designRepository.delete(design.id);
       }
-      console.log(`[Purge] Deleted ${designs.length} designs for ${shopDomain}`);
+      log.info({ shopDomain, count: designs.length }, "Purged designs");
     }
 
     // Delete shop settings (API keys, access tokens)
     if (settingsRepository) {
       settingsRepository.deleteByShop(shopDomain);
-      console.log(`[Purge] Deleted settings for ${shopDomain}`);
+      log.info({ shopDomain }, "Purged settings");
     }
 
     // Note: members are global (not shop-scoped), so they are not deleted here.

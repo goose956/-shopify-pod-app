@@ -115,6 +115,8 @@ export function ProductGenerator() {
   const [productType, setProductType] = useState("tshirt");
   const [imageShape, setImageShape] = useState("square");
   const [publishImmediately, setPublishImmediately] = useState(false);
+  const [productPrice, setProductPrice] = useState("");
+  const [compareAtPrice, setCompareAtPrice] = useState("");
   const [isGeneratingDesign, setIsGeneratingDesign] = useState(false);
   const [isGeneratingMockup, setIsGeneratingMockup] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
@@ -146,6 +148,8 @@ export function ProductGenerator() {
   const [winningImageShape, setWinningImageShape] = useState("square");
   const [winningPublishImmediately, setWinningPublishImmediately] = useState(false);
   const [setupNeeded, setSetupNeeded] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [catalogCategories, setCatalogCategories] = useState([]);
   const [isCatalogLoading, setIsCatalogLoading] = useState(false);
@@ -185,7 +189,7 @@ export function ProductGenerator() {
     return () => { cancelled = true; };
   }, []);
 
-  // Check if API keys are configured (onboarding)
+  // Check session info (admin vs merchant, first visit)
   useEffect(() => {
     let cancelled = false;
     async function checkSetup() {
@@ -197,7 +201,15 @@ export function ProductGenerator() {
         if (!res.ok) return;
         const data = await res.json();
         if (!cancelled) {
-          setSetupNeeded(!data.settings?.hasOpenAiKey && !data.settings?.hasKieAiKey);
+          setIsAdmin(!!data.isAdmin);
+          // Show welcome banner on first visit (no designs yet)
+          const designRes = await fetch("/api/designs", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (designRes.ok) {
+            const designData = await designRes.json();
+            setShowWelcome(!designData.designs || designData.designs.length === 0);
+          }
         }
       } catch (_) { /* silent */ }
     }
@@ -471,7 +483,13 @@ export function ProductGenerator() {
       const response = await fetch("/api/finalize-product", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
-        body: JSON.stringify({ designId, publishImmediately, lifestylePrompts: selectedLifestylePrompts }),
+        body: JSON.stringify({
+          designId,
+          publishImmediately,
+          lifestylePrompts: selectedLifestylePrompts,
+          ...(productPrice.trim() ? { price: productPrice.trim() } : {}),
+          ...(compareAtPrice.trim() ? { compareAtPrice: compareAtPrice.trim() } : {}),
+        }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -584,26 +602,28 @@ export function ProductGenerator() {
             <span style={{ fontSize: 14 }}>{"\uD83D\uDCDA"}</span>
             Library
           </button>
-          <button
-            onClick={() => setSelectedTab(5)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "8px 16px",
-              fontSize: 13,
-              fontWeight: selectedTab === 5 ? 600 : 500,
-              color: selectedTab === 5 ? "#fff" : "#303030",
-              background: selectedTab === 5 ? "#005bd3" : "transparent",
-              border: "none",
-              cursor: "pointer",
-              transition: "all 0.12s ease",
-              whiteSpace: "nowrap",
-            }}
-          >
-            <span style={{ fontSize: 14 }}>{"\u2699\uFE0F"}</span>
-            Admin
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setSelectedTab(5)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: selectedTab === 5 ? 600 : 500,
+                color: selectedTab === 5 ? "#fff" : "#303030",
+                background: selectedTab === 5 ? "#005bd3" : "transparent",
+                border: "none",
+                cursor: "pointer",
+                transition: "all 0.12s ease",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <span style={{ fontSize: 14 }}>{"\u2699\uFE0F"}</span>
+              Admin
+            </button>
+          )}
           <button
             onClick={() => setSelectedTab(6)}
             style={{
@@ -635,14 +655,22 @@ export function ProductGenerator() {
         </Banner>
       )}
 
-      {/* Onboarding banner */}
-      {setupNeeded && selectedTab === 0 && (
+      {/* Welcome banner for first-time merchants */}
+      {showWelcome && selectedTab === 0 && (
         <Banner
-          tone="warning"
-          title="Set up your API keys to start generating designs"
-          action={{ content: "Go to Admin", onAction: () => setSelectedTab(5) }}
+          tone="info"
+          title="Welcome to POD Design Generator!"
+          onDismiss={() => setShowWelcome(false)}
         >
-          <p>Add an OpenAI or KIE.ai API key in the Admin tab to enable AI design generation.</p>
+          <BlockStack gap="200">
+            <p>Create stunning product listings in 3 simple steps:</p>
+            <ul style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8 }}>
+              <li><strong>Describe</strong> your design idea or upload a reference image</li>
+              <li><strong>Preview & refine</strong> your AI-generated artwork</li>
+              <li><strong>Publish</strong> directly to your Shopify store</li>
+            </ul>
+            <p style={{ marginTop: 4 }}>Get started by describing your first design below!</p>
+          </BlockStack>
         </Banner>
       )}
 
@@ -1178,6 +1206,30 @@ export function ProductGenerator() {
                     autoComplete="off"
                   />
                 ))}
+              </InlineGrid>
+              <Divider />
+              <Text variant="headingMd" as="h2" fontWeight="semibold">Pricing (optional)</Text>
+              <Text variant="bodySm" tone="subdued" as="p">Set a price now or leave blank to set it later in Shopify.</Text>
+              <InlineGrid columns={{ xs: 1, sm: 2 }} gap="400">
+                <TextField
+                  label="Price"
+                  value={productPrice}
+                  onChange={setProductPrice}
+                  placeholder="e.g. 29.99"
+                  type="number"
+                  prefix="$"
+                  autoComplete="off"
+                />
+                <TextField
+                  label="Compare at price"
+                  value={compareAtPrice}
+                  onChange={setCompareAtPrice}
+                  placeholder="e.g. 39.99"
+                  type="number"
+                  prefix="$"
+                  helpText="Shows as the original price with a sale strikethrough"
+                  autoComplete="off"
+                />
               </InlineGrid>
               <Divider />
               <InlineStack gap="300" blockAlign="center">
