@@ -1,6 +1,6 @@
 # Shopify App Troubleshooting Guide
 
-Reference document for issues encountered and resolved while building the POD Design Generator Shopify app.
+Reference document for issues encountered and resolved while building the ListingLab Shopify app.
 
 ---
 

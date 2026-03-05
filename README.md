@@ -1,4 +1,4 @@
-# POD Shopify App (Minimal MVP)
+# ListingLab
 
 This repository contains a minimal implementation of a POD-focused Shopify app:
 

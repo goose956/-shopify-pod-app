@@ -1,8 +1,8 @@
 {
-  "name": "pod-shopify-minimal-app",
+  "name": "listinglab",
   "version": "0.1.0",
   "private": true,
-  "description": "Minimal Shopify embedded UI + Railway backend for POD workflow",
+  "description": "ListingLab — AI-powered print-on-demand listing creator for Shopify",
   "scripts": {
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "node backend/index.js",

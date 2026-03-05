@@ -653,7 +653,7 @@ export function ProductGenerator() {
       {showWelcome && selectedTab === 0 && (
         <Card>
           <EmptyState
-            heading="Welcome to POD Design Generator!"
+            heading="Welcome to ListingLab!"
             image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
           >
             <BlockStack gap="200">

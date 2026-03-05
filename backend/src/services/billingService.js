@@ -148,7 +148,7 @@ class BillingService {
     `;
 
     const variables = {
-      name: `POD Design Generator — ${plan.name}`,
+      name: `ListingLab — ${plan.name}`,
       returnUrl,
       trialDays: plan.trialDays,
       lineItems: [

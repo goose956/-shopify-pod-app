@@ -2,7 +2,7 @@
 # This file declares the app's configuration including scopes, URLs, and webhooks.
 # Push to Partner Dashboard with: npx shopify app config push
 
-name = "POD Design Generator"
+name = "ListingLab"
 client_id = "fed58333bb62adb69343c109cd77d5ef"
 application_url = "https://shopify-pod-app-production.up.railway.app"
 embedded = true

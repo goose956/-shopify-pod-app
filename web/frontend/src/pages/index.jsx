@@ -3,7 +3,7 @@ import { ProductGenerator } from "../components/ProductGenerator";
 
 export default function HomePage() {
   return (
-    <Page title="AI POD Product Generator" subtitle="Create AI-designed products and publish them to your Shopify store in minutes.">
+    <Page title="ListingLab" subtitle="Create AI-designed print-on-demand products and publish them to your store in minutes.">
       <ProductGenerator />
     </Page>
   );
