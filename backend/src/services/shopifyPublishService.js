@@ -23,8 +23,8 @@ class ShopifyPublishService {
     if (this.appBaseUrl && url.startsWith("/")) {
       return `${this.appBaseUrl}${url}`;
     }
-    log.warn({ url }, "Cannot resolve image URL to public URL (no APP_URL configured)");
-    return url;
+    log.warn({ url }, "Cannot resolve image URL to public URL (no APP_URL configured) — skipping");
+    return null;
   }
 
   /**

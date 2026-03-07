@@ -80,7 +80,7 @@ _toPublicUrl(url) {
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   if (this.appBaseUrl && url.startsWith("/")) {
     return `${this.appBaseUrl}${url}`;  
-    // e.g., /uploads/abc.png → https://shopify-pod-app-production.up.railway.app/uploads/abc.png
+    // e.g., /uploads/abc.png → https://listinglab-production.up.railway.app/uploads/abc.png
   }
   return url;
 }
@@ -113,7 +113,7 @@ async _attachImagesGraphQL(shopDomain, accessToken, productGid, imageUrls) {
 - `backend/src/routes/podRoutes.js` — `persistImageUrl()` saves external URLs locally
 
 ### Environment Variables Required
-- `SHOPIFY_HOST_NAME` — must be set to the public app URL (e.g., `shopify-pod-app-production.up.railway.app`) so relative paths can be resolved. Set this on Railway.
+- `SHOPIFY_HOST_NAME` — must be set to the public app URL (e.g., `listinglab-production.up.railway.app`) so relative paths can be resolved. Set this on Railway.
 
 ### Prevention
 - Always convert relative URLs to absolute public URLs before sending to any external API
@@ -253,7 +253,7 @@ mutation productCreate($input: ProductInput!) {
 |----------|---------|---------|
 | `SHOPIFY_API_KEY` | App Client ID | `fed58333bb62adb69343c109cd77d5ef` |
 | `SHOPIFY_API_SECRET` | App Client Secret | `shpss_...` |
-| `SHOPIFY_HOST_NAME` | Public app URL (no protocol) | `shopify-pod-app-production.up.railway.app` |
+| `SHOPIFY_HOST_NAME` | Public app URL (no protocol) | `listinglab-production.up.railway.app` |
 | `SHOPIFY_SCOPES` | OAuth scopes | `read_products,write_products,read_orders,write_orders` |
 | `SHOPIFY_API_VERSION` | API version | `2025-10` |
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://...` |

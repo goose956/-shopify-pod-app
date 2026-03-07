@@ -1149,7 +1149,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           log.error({ err: fallbackErr?.message }, "Finalize step 1b fallback failed");
         }
       }
-      const lifestyleImages = lifestyleResult.imageUrls || [];
+      let lifestyleImages = lifestyleResult.imageUrls || [];
 
       // ── Step 1c: Persist external URLs to disk ──────────────────────────
       try {
@@ -1159,6 +1159,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       } catch (persistErr) {
         log.warn({ err: persistErr?.message }, "Image persistence warning");
       }
+      // Filter out any URLs that failed to persist or resolve
+      lifestyleImages = lifestyleImages.filter(Boolean);
 
       // ── Step 2: Transparent artwork ─────────────────────────────────────
       let transparentArtworkUrl = design.rawArtworkUrl || null;
