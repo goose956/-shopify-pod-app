@@ -4,7 +4,7 @@
 
 name = "ListingLab"
 client_id = "fed58333bb62adb69343c109cd77d5ef"
-application_url = "https://listinglab-production.up.railway.app"
+application_url = "https://shopify-pod-app-production.up.railway.app"
 embedded = true
 
 [access_scopes]
@@ -12,16 +12,16 @@ scopes = "read_products,write_products"
 
 [auth]
 redirect_urls = [
-  "https://listinglab-production.up.railway.app/auth/callback"
+  "https://shopify-pod-app-production.up.railway.app/auth/callback"
 ]
 
 [webhooks]
 api_version = "2025-10"
 
   [webhooks.privacy_compliance]
-  customer_data_request_url = "https://listinglab-production.up.railway.app/webhooks/customers/data_request"
-  customer_deletion_url = "https://listinglab-production.up.railway.app/webhooks/customers/redact"
-  shop_deletion_url = "https://listinglab-production.up.railway.app/webhooks/shop/redact"
+  customer_data_request_url = "https://shopify-pod-app-production.up.railway.app/webhooks/customers/data_request"
+  customer_deletion_url = "https://shopify-pod-app-production.up.railway.app/webhooks/customers/redact"
+  shop_deletion_url = "https://shopify-pod-app-production.up.railway.app/webhooks/shop/redact"
 
 [pos]
 embedded = false

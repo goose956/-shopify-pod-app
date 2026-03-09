@@ -9,8 +9,9 @@ const log = require("../utils/logger");
  * Required for App Store submission.
  * See: https://shopify.dev/docs/apps/webhooks/configuration/mandatory-webhooks
  */
-function createWebhookRouter({ config, settingsRepository, designRepository, memberRepository, assetRepository, productRepository, uploadsDir }) {
+function createWebhookRouter(deps) {
   const router = express.Router();
+  const config = deps.config;
 
   // Use raw body for HMAC verification
   router.use(express.raw({ type: "application/json" }));
@@ -74,7 +75,7 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
     log.info({ shop_domain }, "GDPR shop/redact — purging all shop data");
 
     try {
-      _purgeShopData(shop_domain);
+      _purgeShopData(shop_domain, deps);
       log.info({ shop_domain }, "GDPR shop/redact complete");
     } catch (err) {
       log.error({ shop_domain, err: err?.message }, "GDPR shop/redact error");
@@ -91,6 +92,7 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
     log.info({ shopDomain }, "app/uninstalled webhook received");
 
     try {
+      const settingsRepository = deps.settingsRepository;
       // Revoke stored access token immediately
       if (settingsRepository) {
         const settings = settingsRepository.findByShop(shopDomain);
@@ -122,8 +124,10 @@ function createWebhookRouter({ config, settingsRepository, designRepository, mem
    * Purge all data for a given shop domain.
    * Called by shop/redact (48h after uninstall).
    */
-  function _purgeShopData(shopDomain) {
+  function _purgeShopData(shopDomain, deps) {
     if (!shopDomain) return;
+    const { designRepository, assetRepository, productRepository, settingsRepository } = deps;
+    const uploadsDir = deps.uploadsDir;
 
     // Delete all designs + their assets + products + uploaded files
     if (designRepository) {

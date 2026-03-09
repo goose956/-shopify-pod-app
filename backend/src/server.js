@@ -123,6 +123,10 @@ async function createServer() {
     });
   });
 
+  // ── GDPR + uninstall webhooks (register early so compliance checks never 404) ──
+  const webhookDeps = { config, settingsRepository: null, designRepository: null, memberRepository: null, assetRepository: null, productRepository: null, uploadsDir };
+  app.use("/webhooks", createWebhookRouter(webhookDeps));
+
   // ── Start listening IMMEDIATELY so Railway health-checks pass ─────────
   const port = Number(process.env.PORT || 3000);
   const server = app.listen(port, () => {
@@ -155,8 +159,12 @@ async function createServer() {
   const settingsRepository = new SettingsRepository(store);
   const memberRepository = new MemberRepository(store);
 
-  // ── GDPR + uninstall webhooks ─────────────────────────────────────────────
-  app.use("/webhooks", createWebhookRouter({ config, settingsRepository, designRepository, memberRepository, assetRepository, productRepository, uploadsDir }));
+  // Populate webhook deps now that DB is ready
+  webhookDeps.settingsRepository = settingsRepository;
+  webhookDeps.designRepository = designRepository;
+  webhookDeps.memberRepository = memberRepository;
+  webhookDeps.assetRepository = assetRepository;
+  webhookDeps.productRepository = productRepository;
 
   const authService = new AuthService(config);
   const memberAuthService = new MemberAuthService(memberRepository);
