@@ -47,7 +47,7 @@ After deploying:
 4. Verify with: `GET /api/verify-scopes` — should show all 4 scopes
 
 ### Key Files
-- `shopify.app.toml` — declares `scopes = "read_products,write_products,read_orders,write_orders"`
+- `shopify.app.toml` — declares `scopes = "read_products,write_products"`
 - `backend/src/routes/authRoutes.js` — OAuth install/callback flow
 - `backend/src/config.js` — `shopify.scopes` array
 
@@ -254,7 +254,7 @@ mutation productCreate($input: ProductInput!) {
 | `SHOPIFY_API_KEY` | App Client ID | `fed58333bb62adb69343c109cd77d5ef` |
 | `SHOPIFY_API_SECRET` | App Client Secret | `shpss_...` |
 | `SHOPIFY_HOST_NAME` | Public app URL (no protocol) | `listinglab-production.up.railway.app` |
-| `SHOPIFY_SCOPES` | OAuth scopes | `read_products,write_products,read_orders,write_orders` |
+| `SHOPIFY_SCOPES` | OAuth scopes | `read_products,write_products` |
 | `SHOPIFY_API_VERSION` | API version | `2025-10` |
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://...` |
 | `SETUP_SECRET` | Admin setup auth | `myapp-setup-2026-xK9mP` |
