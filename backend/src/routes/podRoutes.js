@@ -95,6 +95,54 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     return session;
   }
 
+  // ── Token health check (safe for production — no secrets exposed) ────────
+  router.get("/token-health", async (req, res) => {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      return res.status(401).json({ error: "No session", hint: "Open this from within Shopify admin" });
+    }
+
+    const shopSettings = settingsRepository.findByShop(session.shopDomain);
+    const token = shopSettings?.shopifyAccessToken;
+    const allSettings = settingsRepository.store?.read?.()?.settings || [];
+    const storedShops = allSettings
+      .filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics")
+      .map(s => ({ domain: s.shopDomain, hasToken: Boolean(s.shopifyAccessToken), installedAt: s.installedAt }));
+
+    const result = {
+      sessionShopDomain: session.shopDomain,
+      sessionSubject: session.subject,
+      authType: session.authType || "unknown",
+      storeType: settingsRepository.store?.constructor?.name || "unknown",
+      tokenFound: Boolean(token),
+      tokenPrefix: token ? token.slice(0, 8) + "..." : "none",
+      storedShops,
+      shopifyApiCheck: null,
+    };
+
+    // Try to validate the token against Shopify
+    if (token) {
+      try {
+        const apiVersion = config.shopify.apiVersion;
+        const resp = await fetch(
+          `https://${session.shopDomain}/admin/api/${apiVersion}/shop.json`,
+          { headers: { "X-Shopify-Access-Token": token } }
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          result.shopifyApiCheck = { status: resp.status, shopName: data?.shop?.name, valid: true };
+        } else {
+          const body = await resp.text().catch(() => "");
+          result.shopifyApiCheck = { status: resp.status, valid: false, error: body.slice(0, 200) };
+        }
+      } catch (err) {
+        result.shopifyApiCheck = { valid: false, error: err.message };
+      }
+    }
+
+    return res.json(result);
+  });
+
   // ── Verify token scopes against Shopify API directly ────────────────────
   // PRODUCTION GUARD: disabled in production to prevent token/scope leakage
   router.get("/verify-scopes", async (req, res) => {
