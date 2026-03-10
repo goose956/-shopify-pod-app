@@ -29,7 +29,8 @@ class ShopifyPublishService {
 
   /**
    * Resolve the access token for a given shop.
-   * Priority: per-shop OAuth token (from settingsRepository) > global env token > null.
+   * Uses per-shop OAuth token from settingsRepository (stored during /auth/callback).
+   * Falls back to SHOPIFY_ADMIN_ACCESS_TOKEN only in non-production (dev/test).
    */
   _getAccessToken(shopDomain) {
     // 1. Per-shop OAuth token (stored during /auth/callback)
@@ -40,10 +41,17 @@ class ShopifyPublishService {
         return shopSettings.shopifyAccessToken;
       }
     }
-    // 2. Global fallback (single-tenant / dev mode)
-    const envToken = this.config.shopify.adminAccessToken || "";
-    log.debug({ hasEnvToken: envToken ? 'present' : 'empty' }, "No per-shop token, using env fallback");
-    return envToken;
+    // 2. Dev/test fallback only — never use a global token in production
+    //    (it belongs to a different store and will always 401)
+    if (process.env.NODE_ENV !== "production") {
+      const envToken = this.config.shopify.adminAccessToken || "";
+      if (envToken) {
+        log.debug({}, "No per-shop token — using env fallback (dev mode)");
+        return envToken;
+      }
+    }
+    log.warn({ shopDomain }, "No access token found — shop must complete OAuth install");
+    return "";
   }
 
   /**
@@ -96,12 +104,9 @@ class ShopifyPublishService {
     const accessToken = this._getAccessToken(shopDomain);
 
     if (!accessToken) {
-      const fallbackId = `gid://shopify/Product/mock-${Date.now()}`;
-      const shopSubdomain = shopDomain.split(".")[0];
-      return {
-        productId: fallbackId,
-        adminUrl: `https://admin.shopify.com/store/${shopSubdomain}/products`,
-      };
+      throw new Error(
+        "No Shopify access token for this store. Please complete the OAuth install by visiting your app's install URL."
+      );
     }
 
     return retryWithBackoff(
