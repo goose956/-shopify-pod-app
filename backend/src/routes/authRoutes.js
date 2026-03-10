@@ -134,7 +134,11 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       // ── CRITICAL: flush to PostgreSQL BEFORE redirecting ──
       try {
         await settingsRepository.flush();
-        log.info({ shop }, "OAuth token flushed to PostgreSQL");
+        log.info({ shop, storeType: settingsRepository.store?.constructor?.name || "unknown" }, "OAuth token flushed to persistent store");
+
+        // Verify token was actually persisted
+        const verifyAfterFlush = settingsRepository.findByShop(shop);
+        log.info({ shop, tokenSaved: Boolean(verifyAfterFlush?.shopifyAccessToken), scopes: verifyAfterFlush?.shopifyScopes || "none" }, "OAuth post-flush verify (in-memory)");
 
         // Double-check: read directly from Postgres to confirm
         if (settingsRepository.store?.pool) {
@@ -142,8 +146,10 @@ function createAuthRouter({ config, authService, settingsRepository }) {
           if (pgResult.rows.length > 0) {
             const pgSettings = pgResult.rows[0].data?.settings || [];
             const match = pgSettings.find(s => s.shopDomain === shop);
-            log.debug({ shop, found: Boolean(match), hasToken: Boolean(match?.shopifyAccessToken), scopes: match?.shopifyScopes || "none" }, "OAuth Postgres verify");
+            log.info({ shop, found: Boolean(match), hasToken: Boolean(match?.shopifyAccessToken), scopes: match?.shopifyScopes || "none" }, "OAuth Postgres direct verify");
           }
+        } else {
+          log.warn({ shop }, "No Postgres pool — token stored in ephemeral JSON (will be lost on redeploy!)");
         }
       } catch (flushErr) {
         log.error({ shop, err: flushErr }, "OAuth flush to PostgreSQL failed");

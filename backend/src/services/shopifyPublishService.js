@@ -35,10 +35,28 @@ class ShopifyPublishService {
   _getAccessToken(shopDomain) {
     // 1. Per-shop OAuth token (stored during /auth/callback)
     if (this.settingsRepository) {
+      // Log all stored shops for diagnostics
+      const allSettings = this.settingsRepository.store?.read?.()?.settings || [];
+      const realShops = allSettings
+        .filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics")
+        .map(s => ({ domain: s.shopDomain, hasToken: Boolean(s.shopifyAccessToken) }));
+      log.info({ shopDomain, storedShops: realShops, storeType: this.settingsRepository.store?.constructor?.name || "unknown" }, "Token lookup — all stored shops");
+
       const shopSettings = this.settingsRepository.findByShop(shopDomain);
-      log.debug({ shopDomain, hasToken: Boolean(shopSettings?.shopifyAccessToken) }, "Token lookup for shop");
       if (shopSettings?.shopifyAccessToken) {
+        log.info({ shopDomain }, "Token found for shop (exact match)");
         return shopSettings.shopifyAccessToken;
+      }
+
+      // Fuzzy match: try normalising the domain (strip trailing slashes, lowercase)
+      const normalised = shopDomain.toLowerCase().replace(/\/+$/, "");
+      for (const entry of allSettings) {
+        if (!entry.shopDomain || !entry.shopifyAccessToken) continue;
+        const entryNorm = entry.shopDomain.toLowerCase().replace(/\/+$/, "");
+        if (entryNorm === normalised) {
+          log.warn({ requested: shopDomain, stored: entry.shopDomain }, "Token found via fuzzy match — domain format mismatch!");
+          return entry.shopifyAccessToken;
+        }
       }
     }
     // 2. Dev/test fallback only — never use a global token in production

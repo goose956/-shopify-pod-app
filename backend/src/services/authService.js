@@ -66,6 +66,7 @@ class AuthService {
     try {
       const payload = await this.shopify.session.decodeSessionToken(token);
       const shopDomain = payload?.dest ? String(payload.dest).replace(/^https?:\/\//, "") : "";
+      log.info({ shopDomain, dest: payload?.dest, iss: payload?.iss }, "JWT session decoded");
       if (!shopDomain) {
         return null;
       }

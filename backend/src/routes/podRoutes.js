@@ -64,6 +64,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
   async function resolveSession(req) {
     const shopifySession = await authService.validateRequest(req);
     if (shopifySession?.shopDomain) {
+      log.info({ shopDomain: shopifySession.shopDomain, subject: shopifySession.subject, authType: "shopify" }, "Session resolved");
       return {
         ...shopifySession,
         authType: "shopify",
@@ -72,6 +73,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     const memberSession = await memberAuthService.validateRequest(req);
     if (memberSession?.shopDomain) {
+      log.info({ shopDomain: memberSession.shopDomain, authType: "member" }, "Session resolved");
       return {
         ...memberSession,
         subject: memberSession.memberId,
@@ -79,6 +81,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       };
     }
 
+    log.warn({ path: req.path, hasAuth: Boolean(req.headers.authorization) }, "Session resolution failed — no valid token");
     return null;
   }
 
