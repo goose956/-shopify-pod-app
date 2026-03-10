@@ -124,6 +124,22 @@ function createAuthRouter({ config, authService, settingsRepository }) {
         return res.status(502).send("Token exchange returned no access token.");
       }
 
+      // Validate the token immediately by calling Shopify
+      try {
+        const testResp = await fetch(
+          `https://${shop}/admin/api/${config.shopify.apiVersion}/shop.json`,
+          { headers: { "X-Shopify-Access-Token": accessToken } }
+        );
+        if (testResp.ok) {
+          log.info({ shop }, "OAuth token validated successfully against Shopify API");
+        } else {
+          const testBody = await testResp.text().catch(() => "");
+          log.error({ shop, status: testResp.status, body: testBody.slice(0, 200) }, "OAuth token FAILED validation — token may be invalid!");
+        }
+      } catch (valErr) {
+        log.warn({ shop, err: valErr.message }, "OAuth token validation check failed (non-fatal)");
+      }
+
       // Store the access token in settings for this shop
       settingsRepository.upsertByShop(shop, {
         shopifyAccessToken: accessToken,

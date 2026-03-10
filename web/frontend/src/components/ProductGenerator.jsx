@@ -1409,7 +1409,7 @@ export function ProductGenerator() {
                       Product images and listing copy were generated successfully, but publishing to Shopify failed: {finalProduct.publishError || "No valid Shopify access token."}
                     </p>
                     <p>
-                      To fix this, complete the OAuth install by visiting your app's install URL, then retry publishing below.
+                      Click "Reconnect Store" to re-authorize, then retry publishing.
                     </p>
                   </Banner>
                 </>
@@ -1423,9 +1423,28 @@ export function ProductGenerator() {
               <BlockStack gap="300">
                 <Text variant="headingSm" as="h3">Retry Publishing</Text>
                 <Text variant="bodySm" tone="subdued" as="p">
-                  If you have completed the Shopify OAuth install, you can retry publishing this product.
+                  If publishing failed, reconnect your store first, then retry.
                 </Text>
                 <InlineStack gap="300">
+                  <Button
+                    onClick={async () => {
+                      try {
+                        const sessionToken = await getSessionToken();
+                        const resp = await fetch("/api/reauth", {
+                          headers: { Authorization: `Bearer ${sessionToken}` },
+                        });
+                        const data = await resp.json();
+                        if (data.authUrl) {
+                          // Open the OAuth flow — this will redirect back into the app
+                          window.open(data.authUrl, "_top");
+                        }
+                      } catch (err) {
+                        setError("Could not start re-authorization: " + (err.message || err));
+                      }
+                    }}
+                  >
+                    Reconnect Store
+                  </Button>
                   <Button
                     variant="primary"
                     onClick={async () => {
@@ -1445,7 +1464,7 @@ export function ProductGenerator() {
                         if (data.productId) {
                           setFinalProduct({ adminUrl: data.adminUrl, productId: data.productId, publishError: null });
                         } else {
-                          setError(data.publishError || "Publish still failed. Ensure you have completed the OAuth install.");
+                          setError(data.publishError || "Publish still failed. Try 'Reconnect Store' first.");
                         }
                       } catch (err) {
                         setError(err.message || "Retry failed");

@@ -95,6 +95,18 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     return session;
   }
 
+  // ── Re-auth: returns the OAuth install URL for the current shop ──────────
+  router.get("/reauth", async (req, res) => {
+    const session = await resolveSession(req);
+    if (!session?.shopDomain) {
+      return res.status(401).json({ error: "No session" });
+    }
+    const shop = session.shopDomain;
+    const host = (config.shopify.hostName || "").replace(/^https?:\/\//, "");
+    const authUrl = `https://${host}/auth?shop=${encodeURIComponent(shop)}`;
+    return res.json({ authUrl, shop });
+  });
+
   // ── Token health check (safe for production — no secrets exposed) ────────
   router.get("/token-health", async (req, res) => {
     const session = await resolveSession(req);

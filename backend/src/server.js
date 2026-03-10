@@ -110,11 +110,25 @@ async function createServer() {
     res.sendFile(path.join(__dirname, "..", "pages", "terms.html"));
   });
 
-  // SPA catch-all: serve index.html for any non-API GET request, injecting the API key
+  // SPA catch-all: serve index.html for any non-API GET request, injecting the API key.
+  // If a ?shop= param is present AND we have a DB with no valid token for that shop,
+  // redirect to the OAuth install flow so the token is obtained before the app loads.
+  let _settingsRepository = null; // populated after DB init
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health" || req.path === "/privacy" || req.path === "/terms") {
       return next();
     }
+
+    // ── Install detection: redirect to OAuth if shop has no token ──────────
+    const shopParam = String(req.query.shop || "").trim();
+    if (shopParam && /^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shopParam) && _settingsRepository) {
+      const existing = _settingsRepository.findByShop(shopParam);
+      if (!existing?.shopifyAccessToken) {
+        log.info({ shop: shopParam }, "Install detection: no token for shop — redirecting to OAuth");
+        return res.redirect(`/auth?shop=${encodeURIComponent(shopParam)}`);
+      }
+    }
+
     const indexPath = path.join(frontendDist, "index.html");
     fs.readFile(indexPath, "utf8", (err, html) => {
       if (err) return next();
@@ -158,6 +172,9 @@ async function createServer() {
   const productRepository = new ProductRepository(store);
   const settingsRepository = new SettingsRepository(store);
   const memberRepository = new MemberRepository(store);
+
+  // Enable install detection in the SPA catch-all now that DB is ready
+  _settingsRepository = settingsRepository;
 
   // Populate webhook deps now that DB is ready
   webhookDeps.settingsRepository = settingsRepository;
