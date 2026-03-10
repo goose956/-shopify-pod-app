@@ -91,6 +91,14 @@ class ShopifyPublishService {
 
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+
+      // If 401, the token is stale/revoked — clear it
+      if (response.status === 401 && this.settingsRepository) {
+        log.warn({ shopDomain }, "Clearing stale token after GraphQL 401");
+        this.settingsRepository.upsertByShop(shopDomain, { shopifyAccessToken: "", shopifyScopes: "" });
+        this.settingsRepository.flush().catch(() => {});
+      }
+
       const err = new Error(
         `Shopify API error (${response.status}): ${body.slice(0, 300)}`
       );
@@ -300,6 +308,17 @@ class ShopifyPublishService {
     if (!response.ok) {
       const body = await response.text().catch(() => "");
       log.error({ status: response.status, bodyPreview: body.slice(0, 500) }, "REST create failed");
+
+      // If 401, the token is stale/revoked — clear it so the next attempt triggers re-install
+      if (response.status === 401 && this.settingsRepository) {
+        log.warn({ shopDomain }, "Clearing stale token after 401 — shop must re-authorize");
+        this.settingsRepository.upsertByShop(shopDomain, {
+          shopifyAccessToken: "",
+          shopifyScopes: "",
+        });
+        this.settingsRepository.flush().catch(() => {});
+      }
+
       throw new Error(`Shopify REST product create failed (${response.status}): ${body.slice(0, 200)}`);
     }
 

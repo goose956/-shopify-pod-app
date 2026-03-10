@@ -32,6 +32,30 @@ function createAuthRouter({ config, authService, settingsRepository }) {
     return entry;
   }
 
+  // ── GET /auth/reinstall ──────────────────────────────────────────────────
+  // Clears any stale token for the shop and forces a fresh OAuth flow.
+  router.get("/auth/reinstall", (req, res) => {
+    const shop = String(req.query.shop || "").trim();
+    if (!shop || !/^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shop)) {
+      return res.status(400).send("Missing or invalid shop parameter.");
+    }
+
+    // Clear old token so install detection and OAuth starts fresh
+    const existing = settingsRepository.findByShop(shop);
+    if (existing?.shopifyAccessToken) {
+      log.info({ shop }, "Reinstall: clearing stale access token");
+      settingsRepository.upsertByShop(shop, {
+        shopifyAccessToken: "",
+        shopifyScopes: "",
+      });
+      settingsRepository.flush().catch((e) =>
+        log.error({ err: e }, "Reinstall flush error")
+      );
+    }
+
+    return res.redirect(`/auth?shop=${encodeURIComponent(shop)}`);
+  });
+
   // ── GET /auth ──────────────────────────────────────────────────────────────
   // Redirect merchant to Shopify consent screen
   router.get("/auth", (req, res) => {
