@@ -121,10 +121,10 @@ class ShopifyPublishService {
   /**
    * Create a product on Shopify as DRAFT (or ACTIVE) and optionally attach images.
    *
-   * Strategy:
-   *  1. Try modern productCreate WITHOUT images (images field removed in 2024-04+).
-   *  2. Attach images via REST Admin Products API (stable across versions).
-   *  3. If modern mutation fails, fall back to REST product creation entirely.
+   * Strategy (all GraphQL — REST Admin API removed in 2025-04+):
+   *  1. Create product via GraphQL productCreate (without images).
+   *  2. Attach images via GraphQL productCreateMedia.
+   *  3. Set variant pricing via GraphQL productVariantsBulkUpdate.
    */
   async publish({ shopDomain, title, descriptionHtml, tags, imageUrls, publishImmediately, price, compareAtPrice, productType }) {
     const accessToken = this._getAccessToken(shopDomain);
@@ -140,83 +140,66 @@ class ShopifyPublishService {
         let productId = null;
         let numericId = null;
 
-        // ── Attempt 1: GraphQL productCreate (without images) ──
-        try {
-          const payload = await this._graphql(shopDomain, accessToken,
-            `mutation productCreate($input: ProductInput!) {
-              productCreate(input: $input) {
-                product { id handle }
-                userErrors { field message }
+        // ── Create product via GraphQL productCreate ──
+        const payload = await this._graphql(shopDomain, accessToken,
+          `mutation productCreate($input: ProductInput!) {
+            productCreate(input: $input) {
+              product {
+                id
+                handle
+                variants(first: 1) {
+                  edges { node { id } }
+                }
               }
-            }`,
-            {
-              input: {
-                title,
-                descriptionHtml,
-                status: publishImmediately ? "ACTIVE" : "DRAFT",
-                tags,
-              },
+              userErrors { field message }
             }
-          );
-
-          const userErrors = payload?.data?.productCreate?.userErrors || [];
-          if (userErrors.length > 0) {
-            throw new Error(userErrors.map((e) => e.message).join("; ") || "productCreate failed");
+          }`,
+          {
+            input: {
+              title,
+              descriptionHtml,
+              status: publishImmediately ? "ACTIVE" : "DRAFT",
+              tags,
+              ...(productType ? { productType } : {}),
+            },
           }
+        );
 
-          const product = payload?.data?.productCreate?.product;
-          if (product?.id) {
-            productId = product.id;
-            numericId = product.id.split("/").pop();
-            log.info({ productId }, "Product created via GraphQL");
-          } else {
-            log.warn({ responsePreview: JSON.stringify(payload).slice(0, 500) }, "GraphQL returned no product");
-          }
-        } catch (gqlErr) {
-          log.warn({ err: gqlErr.message }, "GraphQL productCreate failed, falling back to REST");
+        const userErrors = payload?.data?.productCreate?.userErrors || [];
+        if (userErrors.length > 0) {
+          throw new Error(userErrors.map((e) => e.message).join("; ") || "productCreate failed");
         }
 
-        // ── Attempt 2: REST fallback if GraphQL failed ──
-        if (!productId) {
-          const restData = {
-            title,
-            body_html: descriptionHtml,
-            status: publishImmediately ? "active" : "draft",
-            tags: Array.isArray(tags) ? tags.join(", ") : tags,
-            images: (imageUrls || []).map((src) => ({ src: this._toPublicUrl(src) })).filter(i => i.src),
-          };
-          if (productType) restData.product_type = productType;
-          // Include variant with pricing if price is provided
-          if (price) {
-            restData.variants = [{
-              price,
-              ...(compareAtPrice ? { compare_at_price: compareAtPrice } : {}),
-              inventory_management: null,
-            }];
-          }
-          const restProduct = await this._createProductREST(shopDomain, accessToken, restData);
-          productId = `gid://shopify/Product/${restProduct.id}`;
-          numericId = String(restProduct.id);
-          log.info({ productId }, "Product created via REST");
-        } else {
-          // ── Attach images via GraphQL productCreateMedia (preferred) or REST fallback ──
-          if (imageUrls && imageUrls.length > 0) {
-            const publicUrls = imageUrls.map(u => this._toPublicUrl(u)).filter(Boolean);
+        const product = payload?.data?.productCreate?.product;
+        if (!product?.id) {
+          log.warn({ responsePreview: JSON.stringify(payload).slice(0, 500) }, "GraphQL returned no product");
+          throw new Error("Shopify productCreate returned no product ID");
+        }
+
+        productId = product.id;
+        numericId = product.id.split("/").pop();
+        log.info({ productId }, "Product created via GraphQL");
+
+        // ── Attach images via GraphQL productCreateMedia ──
+        if (imageUrls && imageUrls.length > 0) {
+          const publicUrls = imageUrls.map(u => this._toPublicUrl(u)).filter(Boolean);
+          if (publicUrls.length > 0) {
             log.info({ imageCount: publicUrls.length, productId, urls: publicUrls }, "Attaching images to product");
-            const attached = await this._attachImagesGraphQL(shopDomain, accessToken, productId, publicUrls);
-            if (!attached) {
-              log.info({}, "GraphQL media attach failed, trying REST fallback");
-              await this._attachImagesREST(shopDomain, accessToken, numericId, publicUrls);
-            }
+            await this._attachImagesGraphQL(shopDomain, accessToken, productId, publicUrls);
           }
         }
 
-        // ── Set variant pricing if product was created via GraphQL and price is provided ──
-        if (productId && numericId && price) {
-          try {
-            await this._setVariantPricing(shopDomain, accessToken, numericId, price, compareAtPrice, productType);
-          } catch (priceErr) {
-            log.warn({ err: priceErr.message }, "Variant pricing failed (non-fatal)");
+        // ── Set variant pricing via GraphQL ──
+        if (price) {
+          const variantGid = product.variants?.edges?.[0]?.node?.id;
+          if (variantGid) {
+            try {
+              await this._setVariantPricingGraphQL(shopDomain, accessToken, productId, variantGid, price, compareAtPrice);
+            } catch (priceErr) {
+              log.warn({ err: priceErr.message }, "Variant pricing failed (non-fatal)");
+            }
+          } else {
+            log.warn({ productId }, "No variant GID returned — cannot set pricing");
           }
         }
 
@@ -231,110 +214,36 @@ class ShopifyPublishService {
   }
 
   /**
-   * Set pricing on a product's default variant via REST.
-   * Called after GraphQL product creation (which doesn't support variant pricing inline).
+   * Set variant pricing via GraphQL productVariantsBulkUpdate.
    */
-  async _setVariantPricing(shopDomain, accessToken, numericProductId, price, compareAtPrice, productType) {
-    const apiVersion = this.config.shopify.apiVersion;
-    // First, get the product's variants
-    const getUrl = `https://${shopDomain}/admin/api/${apiVersion}/products/${numericProductId}.json?fields=id,variants,product_type`;
-    const getResp = await fetch(getUrl, {
-      headers: { "X-Shopify-Access-Token": accessToken },
-    });
-    if (!getResp.ok) {
-      throw new Error(`Failed to fetch product variants (${getResp.status})`);
-    }
-    const productData = await getResp.json();
-    const variants = productData?.product?.variants || [];
-
-    // Update product_type if provided
-    if (productType) {
-      try {
-        await fetch(`https://${shopDomain}/admin/api/${apiVersion}/products/${numericProductId}.json`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": accessToken },
-          body: JSON.stringify({ product: { id: numericProductId, product_type: productType } }),
-        });
-      } catch (_) { /* non-fatal */ }
-    }
-
-    if (variants.length === 0) {
-      log.warn({}, "No variants found for pricing");
-      return;
-    }
-
-    // Update the default (first) variant with pricing
-    const variant = variants[0];
-    const variantUrl = `https://${shopDomain}/admin/api/${apiVersion}/variants/${variant.id}.json`;
-    const variantData = {
-      variant: {
-        id: variant.id,
-        price,
-        ...(compareAtPrice ? { compare_at_price: compareAtPrice } : {}),
-      },
-    };
-
-    const putResp = await fetch(variantUrl, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": accessToken },
-      body: JSON.stringify(variantData),
-    });
-
-    if (!putResp.ok) {
-      const body = await putResp.text().catch(() => "");
-      throw new Error(`Variant pricing update failed (${putResp.status}): ${body.slice(0, 200)}`);
-    }
-
-    log.info({ variantId: variant.id, price, compareAtPrice: compareAtPrice || "none" }, "Variant pricing set");
-  }
-
-  /**
-   * Create a product via the REST Admin API (works across all versions).
-   */
-  async _createProductREST(shopDomain, accessToken, productData) {
-    const apiVersion = this.config.shopify.apiVersion;
-    const url = `https://${shopDomain}/admin/api/${apiVersion}/products.json`;
-    log.info({ url }, "REST POST to Shopify");
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": accessToken,
-      },
-      body: JSON.stringify({ product: productData }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      log.error({ status: response.status, bodyPreview: body.slice(0, 500) }, "REST create failed");
-
-      // If 401, the token is stale/revoked — clear it so the next attempt triggers re-install
-      if (response.status === 401 && this.settingsRepository) {
-        log.warn({ shopDomain }, "Clearing stale token after 401 — shop must re-authorize");
-        this.settingsRepository.upsertByShop(shopDomain, {
-          shopifyAccessToken: "",
-          shopifyScopes: "",
-        });
-        this.settingsRepository.flush().catch(() => {});
+  async _setVariantPricingGraphQL(shopDomain, accessToken, productGid, variantGid, price, compareAtPrice) {
+    const payload = await this._graphql(shopDomain, accessToken,
+      `mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          productVariants { id price compareAtPrice }
+          userErrors { field message }
+        }
+      }`,
+      {
+        productId: productGid,
+        variants: [{
+          id: variantGid,
+          price,
+          ...(compareAtPrice ? { compareAtPrice } : {}),
+        }],
       }
+    );
 
-      throw new Error(`Shopify REST product create failed (${response.status}): ${body.slice(0, 200)}`);
+    const userErrors = payload?.data?.productVariantsBulkUpdate?.userErrors || [];
+    if (userErrors.length > 0) {
+      throw new Error(userErrors.map((e) => e.message).join("; "));
     }
 
-    const data = await response.json();
-    if (!data?.product?.id) {
-      log.error({ responsePreview: JSON.stringify(data).slice(0, 500) }, "REST create returned no product");
-      throw new Error("Shopify REST create returned no product");
-    }
-
-    log.info({ productId: data.product.id }, "REST product created");
-    return data.product;
+    log.info({ variantGid, price, compareAtPrice: compareAtPrice || "none" }, "Variant pricing set via GraphQL");
   }
 
   /**
-   * Attach images to a product via GraphQL productCreateMedia (works in 2025-10+).
-   * Returns true if successful, false if failed (so caller can try REST fallback).
+   * Attach images to a product via GraphQL productCreateMedia.
    */
   async _attachImagesGraphQL(shopDomain, accessToken, productGid, imageUrls) {
     try {
@@ -366,34 +275,6 @@ class ShopifyPublishService {
     } catch (err) {
       log.warn({ err: err.message }, "GraphQL productCreateMedia failed");
       return false;
-    }
-  }
-
-  /**
-   * Attach images to an existing product via the REST Admin API (fallback).
-   */
-  async _attachImagesREST(shopDomain, accessToken, numericProductId, imageUrls) {
-    const apiVersion = this.config.shopify.apiVersion;
-    for (const src of imageUrls) {
-      try {
-        const url = `https://${shopDomain}/admin/api/${apiVersion}/products/${numericProductId}/images.json`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": accessToken,
-          },
-          body: JSON.stringify({ image: { src } }),
-        });
-        if (!response.ok) {
-          const body = await response.text().catch(() => "");
-          log.warn({ status: response.status, bodyPreview: body.slice(0, 200) }, "Image attach failed");
-        } else {
-          log.info({ numericProductId }, "Image attached to product");
-        }
-      } catch (imgErr) {
-        log.warn({ err: imgErr.message }, "Image attach error");
-      }
     }
   }
 }

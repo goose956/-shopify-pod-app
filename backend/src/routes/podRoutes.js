@@ -1165,53 +1165,6 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         };
       }
 
-      // ── Step 1b: OpenAI fallback if primary provider failed ─────────────
-      if (lifestyleResult.provider !== "kie" && lifestyleResult.provider !== "openai" && lifestyleResult.provider !== "stability" && lifestyleResult.provider !== "stability-openai-mixed") {
-        try {
-          log.debug({}, "Finalize step 1b: trying OpenAI fallback for product images");
-          const scenePrompts = requestedLifestylePrompts.length
-            ? requestedLifestylePrompts
-            : [
-                `Place this exact ${design.productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
-                `Show this exact ${design.productType} product in a clean, minimal flat-lay arrangement on a light surface. Keep the product design exactly as shown in the reference image.`,
-                `Show a person holding this exact ${design.productType} product in a lifestyle setting. Keep the product design exactly as shown in the reference image.`,
-              ];
-
-          const openAiLifestyleImages = [];
-          for (const scenePrompt of scenePrompts) {
-            let imageUrl = null;
-            try {
-              imageUrl = await pipelineService.generateOpenAiImageEdit({
-                prompt: scenePrompt,
-                referenceImageUrl: design.previewImageUrl,
-                openAiApiKey: settings?.openAiApiKey || "",
-              });
-            } catch { /* ignore */ }
-            if (!imageUrl) {
-              try {
-                imageUrl = await pipelineService.generateOpenAiImage({
-                  prompt: scenePrompt,
-                  openAiApiKey: settings?.openAiApiKey || "",
-                });
-              } catch { /* ignore */ }
-            }
-            if (imageUrl) {
-              openAiLifestyleImages.push(imageUrl);
-            }
-          }
-
-          if (openAiLifestyleImages.length === scenePrompts.length) {
-            lifestyleResult = {
-              imageUrls: openAiLifestyleImages,
-              provider: "openai-image-fallback",
-              providerMessage: `KIE unavailable. Used OpenAI image generation for product scenes. Previous message: ${lifestyleResult.providerMessage}`,
-            };
-          }
-          log.info({ provider: lifestyleResult.provider, imageCount: lifestyleResult.imageUrls?.length || 0 }, "Finalize step 1b complete");
-        } catch (fallbackErr) {
-          log.error({ err: fallbackErr?.message }, "Finalize step 1b fallback failed");
-        }
-      }
       let lifestyleImages = lifestyleResult.imageUrls || [];
 
       // ── Step 1c: Persist external URLs to disk ──────────────────────────

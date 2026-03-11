@@ -132,7 +132,8 @@ class StabilityImageService {
   }
 
   /**
-   * SD3 image-to-image via Stability's v2beta API.
+   * Stable Image Ultra image-to-image via Stability's v2beta API.
+   * (Replaces deprecated sd3 endpoint)
    */
   async _trySD3ImageToImage({
     stabilityApiKey,
@@ -146,13 +147,12 @@ class StabilityImageService {
       formData.append("image", blob, "product.png");
       formData.append("prompt", scenePrompt);
       formData.append("strength", String(Math.min(Math.max(strength, 0.2), 0.8)));
-      formData.append("mode", "image-to-image");
       formData.append("output_format", "png");
 
-      log.info({ prompt: scenePrompt.slice(0, 80), strength }, "Stability SD3 img2img request");
+      log.info({ prompt: scenePrompt.slice(0, 80), strength }, "Stability Ultra img2img request");
 
       const response = await fetch(
-        "https://api.stability.ai/v2beta/stable-image/generate/sd3",
+        "https://api.stability.ai/v2beta/stable-image/generate/ultra",
         {
           method: "POST",
           headers: {
@@ -165,25 +165,26 @@ class StabilityImageService {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        log.warn({ status: response.status, errText: errText.slice(0, 200) }, "Stability SD3 img2img failed");
+        log.warn({ status: response.status, errText: errText.slice(0, 200) }, "Stability Ultra img2img failed");
         return null;
       }
 
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length < 1000) {
-        log.warn({ size: buffer.length }, "Stability SD3 returned suspiciously small image, skipping");
+        log.warn({ size: buffer.length }, "Stability Ultra returned suspiciously small image, skipping");
         return null;
       }
 
       return this._saveToDisk(buffer, "png");
     } catch (err) {
-      log.warn({ err: err?.message }, "Stability SD3 img2img exception");
+      log.warn({ err: err?.message }, "Stability Ultra img2img exception");
       return null;
     }
   }
 
   /**
-   * SDXL image-to-image via Stability's v1 API (fallback).
+   * Stable Image Core image-to-image via Stability's v2beta API (fallback).
+   * (Replaces deprecated SDXL v1 endpoint)
    */
   async _trySDXLImageToImage({
     stabilityApiKey,
@@ -194,29 +195,21 @@ class StabilityImageService {
     try {
       const formData = new FormData();
       const blob = new Blob([imageBuffer], { type: "image/png" });
-      formData.append("init_image", blob, "product.png");
-      formData.append("init_image_mode", "IMAGE_STRENGTH");
-      formData.append("image_strength", String(1 - Math.min(Math.max(strength, 0.2), 0.8)));
-      formData.append("text_prompts[0][text]", scenePrompt);
-      formData.append("text_prompts[0][weight]", "1");
-      formData.append(
-        "text_prompts[1][text]",
-        "blurry, distorted, deformed, bad quality, watermark, text overlay"
-      );
-      formData.append("text_prompts[1][weight]", "-1");
-      formData.append("cfg_scale", "7");
-      formData.append("samples", "1");
-      formData.append("steps", "30");
+      formData.append("image", blob, "product.png");
+      formData.append("prompt", scenePrompt);
+      formData.append("strength", String(Math.min(Math.max(strength, 0.2), 0.8)));
+      formData.append("negative_prompt", "blurry, distorted, deformed, bad quality, watermark, text overlay");
+      formData.append("output_format", "png");
 
-      log.info({ prompt: scenePrompt.slice(0, 80) }, "Stability SDXL img2img request");
+      log.info({ prompt: scenePrompt.slice(0, 80) }, "Stability Core img2img request");
 
       const response = await fetch(
-        "https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/image-to-image",
+        "https://api.stability.ai/v2beta/stable-image/generate/core",
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${stabilityApiKey}`,
-            Accept: "application/json",
+            Accept: "image/*",
           },
           body: formData,
         }
@@ -224,21 +217,19 @@ class StabilityImageService {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => "");
-        log.warn({ status: response.status, errText: errText.slice(0, 200) }, "Stability SDXL img2img failed");
+        log.warn({ status: response.status, errText: errText.slice(0, 200) }, "Stability Core img2img failed");
         return null;
       }
 
-      const payload = await response.json();
-      const b64 = payload?.artifacts?.[0]?.base64;
-      if (!b64) {
-        log.warn({}, "Stability SDXL returned no image data");
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length < 1000) {
+        log.warn({ size: buffer.length }, "Stability Core returned suspiciously small image, skipping");
         return null;
       }
 
-      const buffer = Buffer.from(b64, "base64");
       return this._saveToDisk(buffer, "png");
     } catch (err) {
-      log.warn({ err: err?.message }, "Stability SDXL img2img exception");
+      log.warn({ err: err?.message }, "Stability Core img2img exception");
       return null;
     }
   }

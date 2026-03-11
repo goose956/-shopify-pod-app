@@ -367,76 +367,56 @@ class PodPipelineService {
   }
 
   async generateDesignImage({ artworkPrompt, openAiApiKey, keiAiApiKey, kieGenerateUrl, referenceImageUrl, imageShape, maxWaitMs, pollIntervalMs }) {
-    if (this.isUsableApiKey(openAiApiKey)) {
-      let openAiImageUrl = null;
-      let usedReferenceImage = false;
-
-      if (referenceImageUrl) {
-        openAiImageUrl = await this.generateOpenAiImageEdit({
-          prompt: artworkPrompt,
-          referenceImageUrl,
-          openAiApiKey,
-          imageShape,
-        });
-        usedReferenceImage = Boolean(openAiImageUrl);
-      }
-
-      if (!openAiImageUrl) {
-        const openAiPrompt = referenceImageUrl
-          ? `${artworkPrompt}\n\nKeep the updated design very close to the previous version and apply only the requested change.`
-          : artworkPrompt;
-
-        openAiImageUrl = await this.generateOpenAiImage({
-          prompt: openAiPrompt,
-          openAiApiKey,
-          imageShape,
-        });
-      }
-
-      if (openAiImageUrl) {
-        const providerMessage = usedReferenceImage
-          ? "Live OpenAI image edit used. Reference image provided: true."
-          : `Live OpenAI image generation used${referenceImageUrl ? " without reference image" : ""}. Reference image requested: ${Boolean(referenceImageUrl)}.`;
-
-        return {
-          imageUrl: openAiImageUrl,
-          provider: "openai",
-          providerMessage,
-        };
-      }
-    }
-
-    if (!this.isUsableApiKey(keiAiApiKey)) {
+    if (!this.isUsableApiKey(openAiApiKey)) {
       return {
         imageUrl: `https://via.placeholder.com/1024?text=${encodeURIComponent(artworkPrompt.slice(0, 48))}`,
         provider: "fallback-no-key",
-        providerMessage: "OpenAI image generation failed or key missing, and KEI API key is missing or invalid format.",
+        providerMessage: "OpenAI API key is missing or invalid.",
       };
     }
 
-    try {
-      const imageUrl = await this.requestKieImage({
+    let openAiImageUrl = null;
+    let usedReferenceImage = false;
+
+    if (referenceImageUrl) {
+      openAiImageUrl = await this.generateOpenAiImageEdit({
         prompt: artworkPrompt,
-        inputImageUrl: referenceImageUrl,
-        keiAiApiKey,
-        generateUrl: kieGenerateUrl,
+        referenceImageUrl,
+        openAiApiKey,
         imageShape,
-        maxWaitMs,
-        pollIntervalMs,
       });
+      usedReferenceImage = Boolean(openAiImageUrl);
+    }
+
+    if (!openAiImageUrl) {
+      const openAiPrompt = referenceImageUrl
+        ? `${artworkPrompt}\n\nKeep the updated design very close to the previous version and apply only the requested change.`
+        : artworkPrompt;
+
+      openAiImageUrl = await this.generateOpenAiImage({
+        prompt: openAiPrompt,
+        openAiApiKey,
+        imageShape,
+      });
+    }
+
+    if (openAiImageUrl) {
+      const providerMessage = usedReferenceImage
+        ? "OpenAI image edit used. Reference image provided: true."
+        : `OpenAI image generation used${referenceImageUrl ? " without reference image" : ""}. Reference image requested: ${Boolean(referenceImageUrl)}.`;
 
       return {
-        imageUrl,
-        provider: "kie",
-        providerMessage: `Live KEI image generation used. Reference image provided: ${Boolean(referenceImageUrl)}.`,
-      };
-    } catch (error) {
-      return {
-        imageUrl: `https://via.placeholder.com/1024?text=${encodeURIComponent(artworkPrompt.slice(0, 48))}`,
-        provider: "fallback-error",
-        providerMessage: `${error instanceof Error ? error.message : "KEI request failed."} Reference image provided: ${Boolean(referenceImageUrl)}.`,
+        imageUrl: openAiImageUrl,
+        provider: "openai",
+        providerMessage,
       };
     }
+
+    return {
+      imageUrl: `https://via.placeholder.com/1024?text=${encodeURIComponent(artworkPrompt.slice(0, 48))}`,
+      provider: "fallback-error",
+      providerMessage: "OpenAI image generation failed.",
+    };
   }
 
   async generateOpenAiImage({ prompt, openAiApiKey, imageShape }) {
@@ -611,8 +591,6 @@ class PodPipelineService {
   }
 
   async generateLifestyleImages({ productType, baseDesignImageUrl, designConcept, keiAiApiKey, kieEditUrl, openAiApiKey, stabilityApiKey, lifestylePrompts, maxWaitMs, pollIntervalMs }) {
-    // Prompts describe only the SCENE — the actual design image is sent as a
-    // reference image to the edit API so the product stays visually consistent.
     const defaultPrompts = [
       `Place this exact ${productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
       `Show this exact ${productType} product in a clean, minimal flat-lay arrangement on a light surface. Keep the product design exactly as shown in the reference image.`,
@@ -620,8 +598,7 @@ class PodPipelineService {
     ];
 
     const hasReferenceImage = Boolean(baseDesignImageUrl);
-    const hasStabilityKey = this.isUsableApiKey(stabilityApiKey) && String(stabilityApiKey).length > 10;
-    log.info({ productType, hasReferenceImage, hasStabilityKey, referenceIsDataUri: String(baseDesignImageUrl || "").startsWith("data:") }, "Lifestyle generation starting");
+    log.info({ productType, hasReferenceImage, referenceIsDataUri: String(baseDesignImageUrl || "").startsWith("data:") }, "Lifestyle generation starting (OpenAI)");
 
     const prompts = Array.isArray(lifestylePrompts)
       ? lifestylePrompts.map((item) => String(item || "").trim()).filter(Boolean)
@@ -629,148 +606,66 @@ class PodPipelineService {
 
     const promptsToUse = prompts.length > 0 ? prompts : defaultPrompts;
 
-    // ── Try Stability AI first (much cheaper: ~$0.003-$0.006 per image) ──
-    if (hasStabilityKey && hasReferenceImage && this.stabilityImageService) {
-      try {
-        log.info({}, "Trying Stability AI for product images (cost-optimised)");
-        const stabilityResult = await this.stabilityImageService.generateProductImages({
-          stabilityApiKey: stabilityApiKey,
-          productImageRef: baseDesignImageUrl,
-          productType,
-          scenePrompts: promptsToUse,
-          strength: 0.55,
-        });
-
-        if (stabilityResult.successCount === stabilityResult.totalCount) {
-          log.info({ totalCount: stabilityResult.totalCount }, "Stability AI succeeded for all images");
-          return {
-            imageUrls: stabilityResult.imageUrls,
-            provider: "stability",
-            providerMessage: stabilityResult.providerMessage,
-          };
-        }
-
-        // Partial success — fill gaps with OpenAI
-        if (stabilityResult.successCount > 0) {
-          log.info({ successCount: stabilityResult.successCount, totalCount: stabilityResult.totalCount }, "Stability AI partial success, filling gaps with OpenAI");
-          const mixed = [...stabilityResult.imageUrls];
-          for (let i = 0; i < mixed.length; i++) {
-            if (!mixed[i] && this.isUsableApiKey(openAiApiKey)) {
-              let fallbackUrl = null;
-              if (baseDesignImageUrl) {
-                fallbackUrl = await this.generateOpenAiImageEdit({
-                  prompt: promptsToUse[i],
-                  referenceImageUrl: baseDesignImageUrl,
-                  openAiApiKey,
-                });
-              }
-              if (!fallbackUrl) {
-                fallbackUrl = await this.generateOpenAiImage({
-                  prompt: promptsToUse[i],
-                  openAiApiKey,
-                });
-              }
-              mixed[i] = fallbackUrl || `https://via.placeholder.com/1024?text=${encodeURIComponent(promptsToUse[i].slice(0, 50))}`;
-            }
-          }
-          return {
-            imageUrls: mixed.map(u => u || `https://via.placeholder.com/1024?text=product`),
-            provider: "stability-openai-mixed",
-            providerMessage: `${stabilityResult.successCount} images via Stability AI, remainder via OpenAI fallback.`,
-          };
-        }
-
-        log.warn({}, "Stability AI failed for all images, falling through to OpenAI");
-      } catch (stabErr) {
-        log.warn({ err: stabErr?.message }, "Stability AI error, falling through to OpenAI");
-      }
-    }
-
-    // ── OpenAI path (original, used as fallback) ──
-    if (this.isUsableApiKey(openAiApiKey)) {
-      const openAiResults = [];
-      let usedReferenceImageCount = 0;
-      for (const prompt of promptsToUse) {
-        let imageUrl = null;
-        if (baseDesignImageUrl) {
-          log.debug({ promptPreview: prompt.slice(0, 60) }, "Attempting image edit with reference image");
-          imageUrl = await this.generateOpenAiImageEdit({
-            prompt,
-            referenceImageUrl: baseDesignImageUrl,
-            openAiApiKey,
-          });
-          if (imageUrl) {
-            log.info({}, "Lifestyle image edit succeeded — reference design used");
-            usedReferenceImageCount += 1;
-          } else {
-            log.warn({}, "Lifestyle image edit returned null — falling back to generation without reference");
-          }
-        }
-
-        if (!imageUrl) {
-          imageUrl = await this.generateOpenAiImage({
-            prompt,
-            openAiApiKey,
-          });
-        }
-
-        if (imageUrl) {
-          openAiResults.push(imageUrl);
-        }
-      }
-
-      if (openAiResults.length === promptsToUse.length) {
-        let providerMessage = "Live OpenAI lifestyle generation used.";
-        if (usedReferenceImageCount === promptsToUse.length) {
-          providerMessage = "Live OpenAI lifestyle image edits used with reference design image for all results.";
-        } else if (usedReferenceImageCount > 0) {
-          providerMessage = `Live OpenAI lifestyle generation used. Reference design image applied to ${usedReferenceImageCount}/${promptsToUse.length} results.`;
-        } else if (baseDesignImageUrl) {
-          providerMessage = "Live OpenAI lifestyle generation used without reference design image (edit API unavailable for this request).";
-        }
-
-        return {
-          imageUrls: openAiResults,
-          provider: "openai",
-          providerMessage,
-        };
-      }
-    }
-
-    if (!this.isUsableApiKey(keiAiApiKey)) {
-      const encodedType = encodeURIComponent(productType);
+    if (!this.isUsableApiKey(openAiApiKey)) {
       return {
         imageUrls: promptsToUse.map((prompt) => `https://via.placeholder.com/1024?text=${encodeURIComponent(prompt.slice(0, 60))}`),
         provider: "fallback-no-key",
-        providerMessage: "KEI API key is missing or invalid format.",
+        providerMessage: "OpenAI API key is missing or invalid.",
       };
     }
 
-    const results = [];
+    const openAiResults = [];
+    let usedReferenceImageCount = 0;
     for (const prompt of promptsToUse) {
-      try {
-        const imageUrl = await this.requestKieImage({
+      let imageUrl = null;
+      if (baseDesignImageUrl) {
+        log.debug({ promptPreview: prompt.slice(0, 60) }, "Attempting image edit with reference image");
+        imageUrl = await this.generateOpenAiImageEdit({
           prompt,
-          inputImageUrl: baseDesignImageUrl,
-          keiAiApiKey,
-          generateUrl: kieEditUrl,
-          maxWaitMs,
-          pollIntervalMs,
+          referenceImageUrl: baseDesignImageUrl,
+          openAiApiKey,
         });
-        results.push(imageUrl);
-      } catch {
-        const encodedPrompt = encodeURIComponent(prompt.slice(0, 45));
-        results.push(`https://via.placeholder.com/1024?text=${encodedPrompt}`);
+        if (imageUrl) {
+          log.info({}, "Lifestyle image edit succeeded — reference design used");
+          usedReferenceImageCount += 1;
+        } else {
+          log.warn({}, "Lifestyle image edit returned null — falling back to generation without reference");
+        }
+      }
+
+      if (!imageUrl) {
+        imageUrl = await this.generateOpenAiImage({
+          prompt,
+          openAiApiKey,
+        });
+      }
+
+      if (imageUrl) {
+        openAiResults.push(imageUrl);
       }
     }
 
-    const hadFallback = results.some((url) => url.includes("via.placeholder.com"));
+    if (openAiResults.length > 0) {
+      let providerMessage = "OpenAI lifestyle generation used.";
+      if (usedReferenceImageCount === promptsToUse.length) {
+        providerMessage = "OpenAI lifestyle image edits used with reference design image for all results.";
+      } else if (usedReferenceImageCount > 0) {
+        providerMessage = `OpenAI lifestyle generation used. Reference design image applied to ${usedReferenceImageCount}/${promptsToUse.length} results.`;
+      } else if (baseDesignImageUrl) {
+        providerMessage = "OpenAI lifestyle generation used without reference design image (edit API unavailable for this request).";
+      }
+
+      return {
+        imageUrls: openAiResults,
+        provider: "openai",
+        providerMessage,
+      };
+    }
+
     return {
-      imageUrls: results,
-      provider: hadFallback ? "mixed-fallback" : "kie",
-      providerMessage: hadFallback
-        ? "Some lifestyle images fell back due to provider errors."
-        : "Live KEI lifestyle generation used.",
+      imageUrls: promptsToUse.map((prompt) => `https://via.placeholder.com/1024?text=${encodeURIComponent(prompt.slice(0, 60))}`),
+      provider: "fallback-error",
+      providerMessage: "OpenAI image generation failed for all lifestyle images.",
     };
   }
 
