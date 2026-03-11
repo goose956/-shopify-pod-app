@@ -366,10 +366,16 @@ class PodPipelineService {
     }
   }
 
+  _placeholderDataUri(text) {
+    const escaped = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="100%" height="100%" fill="#e0e0e0"/><text x="50%" y="50%" font-family="sans-serif" font-size="24" fill="#888" text-anchor="middle" dominant-baseline="middle">${escaped.slice(0, 60)}</text></svg>`;
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+  }
+
   async generateDesignImage({ artworkPrompt, openAiApiKey, keiAiApiKey, kieGenerateUrl, referenceImageUrl, imageShape, maxWaitMs, pollIntervalMs }) {
     if (!this.isUsableApiKey(openAiApiKey)) {
       return {
-        imageUrl: `https://via.placeholder.com/1024?text=${encodeURIComponent(artworkPrompt.slice(0, 48))}`,
+        imageUrl: this._placeholderDataUri(artworkPrompt.slice(0, 48)),
         provider: "fallback-no-key",
         providerMessage: "OpenAI API key is missing or invalid.",
       };
@@ -413,7 +419,7 @@ class PodPipelineService {
     }
 
     return {
-      imageUrl: `https://via.placeholder.com/1024?text=${encodeURIComponent(artworkPrompt.slice(0, 48))}`,
+      imageUrl: this._placeholderDataUri(artworkPrompt.slice(0, 48)),
       provider: "fallback-error",
       providerMessage: "OpenAI image generation failed.",
     };
@@ -439,17 +445,16 @@ class PodPipelineService {
     };
 
     try {
-      // Try gpt-image-1 first; fall back to dall-e-3 if that model isn't on this tier
+      // Try gpt-image-1 first; fall back to dall-e-3 if unavailable
       let response = await attemptGeneration("gpt-image-1");
       let usedModel = "gpt-image-1";
 
       if (!response.ok) {
-        const status = response.status;
-        // 400/403/404 typically means the model isn't available on this account tier
-        if (status === 400 || status === 403 || status === 404) {
-          response = await attemptGeneration("dall-e-3", { response_format: "url" });
-          usedModel = "dall-e-3";
-        }
+        const firstStatus = response.status;
+        const firstBody = await response.json().catch(() => ({}));
+        log.warn({ status: firstStatus, detail: firstBody?.error?.message }, "gpt-image-1 failed, trying dall-e-3");
+        response = await attemptGeneration("dall-e-3", { response_format: "url" });
+        usedModel = "dall-e-3";
       }
 
       if (!response.ok) {
@@ -553,11 +558,11 @@ class PodPipelineService {
       let usedModel = "gpt-image-1";
 
       if (!response.ok) {
-        const status = response.status;
-        if (status === 400 || status === 403 || status === 404) {
-          response = await sendEdit("dall-e-2");
-          usedModel = "dall-e-2";
-        }
+        const firstStatus = response.status;
+        const firstBody = await response.json().catch(() => ({}));
+        log.warn({ status: firstStatus, detail: firstBody?.error?.message }, "gpt-image-1 edit failed, trying dall-e-2");
+        response = await sendEdit("dall-e-2");
+        usedModel = "dall-e-2";
       }
 
       if (!response.ok) {
@@ -608,7 +613,7 @@ class PodPipelineService {
 
     if (!this.isUsableApiKey(openAiApiKey)) {
       return {
-        imageUrls: promptsToUse.map((prompt) => `https://via.placeholder.com/1024?text=${encodeURIComponent(prompt.slice(0, 60))}`),
+        imageUrls: promptsToUse.map((prompt) => this._placeholderDataUri(prompt.slice(0, 60))),
         provider: "fallback-no-key",
         providerMessage: "OpenAI API key is missing or invalid.",
       };
@@ -663,7 +668,7 @@ class PodPipelineService {
     }
 
     return {
-      imageUrls: promptsToUse.map((prompt) => `https://via.placeholder.com/1024?text=${encodeURIComponent(prompt.slice(0, 60))}`),
+      imageUrls: promptsToUse.map((prompt) => this._placeholderDataUri(prompt.slice(0, 60))),
       provider: "fallback-error",
       providerMessage: "OpenAI image generation failed for all lifestyle images.",
     };

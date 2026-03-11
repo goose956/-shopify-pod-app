@@ -1158,8 +1158,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       } catch (imgErr) {
         log.error({ err: imgErr?.message, stack: imgErr?.stack }, "Finalize step 1 failed");
         // Provide fallback so the rest of finalize can still complete
+        const placeholderSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="100%" height="100%" fill="#e0e0e0"/><text x="50%" y="50%" font-family="sans-serif" font-size="24" fill="#888" text-anchor="middle" dominant-baseline="middle">Image unavailable</text></svg>`;
         lifestyleResult = {
-          imageUrls: [`https://via.placeholder.com/1024?text=${encodeURIComponent(design.productType + " product image")}`],
+          imageUrls: [`data:image/svg+xml;base64,${Buffer.from(placeholderSvg).toString('base64')}`],
           provider: "fallback-error",
           providerMessage: `Product image generation failed: ${imgErr?.message || "unknown error"}`,
         };
