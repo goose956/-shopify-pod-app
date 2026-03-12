@@ -79,6 +79,41 @@ async function createServer() {
     res.json({ ok: true, dbReady, storeType });
   });
 
+  // ── Admin: reset billing credits (no Shopify session needed) ────────────
+  // Usage: POST /admin/reset-credits?secret=YOUR_SETUP_SECRET
+  // Or:    GET  /admin/reset-credits?secret=YOUR_SETUP_SECRET  (for quick browser use)
+  const handleResetCredits = async (req, res) => {
+    const secret = String(req.query.secret || req.headers["x-admin-secret"] || "").trim();
+    if (!config.dev.setupSecret || secret !== config.dev.setupSecret) {
+      return res.status(401).json({ error: "Invalid or missing secret" });
+    }
+    try {
+      // Wait for store to be ready
+      if (!dbReady) return res.status(503).json({ error: "Database not ready yet" });
+      // We need settingsRepository — it may not be wired yet at boot
+      if (!_settingsRepository) return res.status(503).json({ error: "App still initialising" });
+
+      const db = _settingsRepository.store.read();
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      let resetCount = 0;
+      for (const s of db.settings) {
+        if (s.billingUsage) {
+          s.billingUsage = { credits: 0, periodStart };
+          resetCount++;
+        }
+      }
+      _settingsRepository.store.write(db);
+      log.info({ resetCount }, "Admin: billing credits reset for all shops");
+      return res.json({ ok: true, resetCount, message: `Reset credits to 0 for ${resetCount} shop(s)` });
+    } catch (err) {
+      log.error({ err: err.message }, "Admin reset-credits error");
+      return res.status(500).json({ error: err.message });
+    }
+  };
+  app.get("/admin/reset-credits", handleResetCredits);
+  app.post("/admin/reset-credits", handleResetCredits);
+
   // ── Body parsing (skip /webhooks — they need raw body for HMAC) ────────────
   app.use((req, res, next) => {
     if (req.path.startsWith("/webhooks")) return next();
