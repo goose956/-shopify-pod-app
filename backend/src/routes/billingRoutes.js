@@ -135,6 +135,28 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
     }
   });
 
+  /* ── POST /billing/reset-usage — reset credits to 0 (dev/testing) ── */
+  router.post("/reset-usage", async (req, res) => {
+    const session = await requireShopifySession(req, res);
+    if (!session) return;
+
+    try {
+      const now = new Date();
+      const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      settingsRepository.upsertByShop(session.shopDomain, {
+        billingUsage: { credits: 0, periodStart },
+      });
+      log.info({ shop: session.shopDomain }, "Usage credits reset to 0");
+      res.json({
+        ok: true,
+        billing: billingService.getShopBilling(session.shopDomain),
+      });
+    } catch (err) {
+      log.error({ err: err.message }, "Reset usage error");
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
 

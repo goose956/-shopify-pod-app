@@ -155,6 +155,23 @@ class PodPipelineService {
     return sizeMap[imageShape] || "1024x1024";
   }
 
+  // dall-e-3 only supports 1024x1024, 1024x1792, 1792x1024
+  getDallE3Size(imageShape) {
+    const sizeMap = {
+      square: "1024x1024",
+      portrait: "1024x1792",
+      landscape: "1792x1024",
+      tall_portrait: "1024x1792",
+      wide_landscape: "1792x1024",
+    };
+    return sizeMap[imageShape] || "1024x1024";
+  }
+
+  // dall-e-2 only supports 256x256, 512x512, 1024x1024
+  getDallE2Size() {
+    return "1024x1024";
+  }
+
   // Map shape name to KIE aspect ratio string
   getKieAspectRatio(imageShape) {
     const ratioMap = {
@@ -430,30 +447,28 @@ class PodPipelineService {
       return null;
     }
 
-    const openAiSize = this.getOpenAiSize(imageShape);
-
-    const attemptGeneration = async (model, extraBody = {}) => {
+    const attemptGeneration = async (model, size, extraBody = {}) => {
       const response = await fetch("https://api.openai.com/v1/images/generations", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${openAiApiKey}`,
         },
-        body: JSON.stringify({ model, prompt, size: openAiSize, ...extraBody }),
+        body: JSON.stringify({ model, prompt, size, ...extraBody }),
       });
       return response;
     };
 
     try {
       // Try gpt-image-1 first; fall back to dall-e-3 if unavailable
-      let response = await attemptGeneration("gpt-image-1");
+      let response = await attemptGeneration("gpt-image-1", this.getOpenAiSize(imageShape));
       let usedModel = "gpt-image-1";
 
       if (!response.ok) {
         const firstStatus = response.status;
         const firstBody = await response.json().catch(() => ({}));
         log.warn({ status: firstStatus, detail: firstBody?.error?.message }, "gpt-image-1 failed, trying dall-e-3");
-        response = await attemptGeneration("dall-e-3", { response_format: "url" });
+        response = await attemptGeneration("dall-e-3", this.getDallE3Size(imageShape), { response_format: "url" });
         usedModel = "dall-e-3";
       }
 
@@ -534,34 +549,32 @@ class PodPipelineService {
         filename = `reference.${contentType.includes("jpeg") ? "jpg" : "png"}`;
       }
 
-      const openAiSize = this.getOpenAiSize(imageShape);
-
-      const buildForm = (model) => {
+      const buildForm = (model, size) => {
         const form = new FormData();
         form.append("model", model);
         form.append("prompt", prompt);
-        form.append("size", openAiSize);
+        form.append("size", size);
         form.append("image", imageBlob, filename);
         return form;
       };
 
-      const sendEdit = async (model) => {
+      const sendEdit = async (model, size) => {
         return fetch("https://api.openai.com/v1/images/edits", {
           method: "POST",
           headers: { Authorization: `Bearer ${openAiApiKey}` },
-          body: buildForm(model),
+          body: buildForm(model, size),
         });
       };
 
       // Try gpt-image-1; fall back to dall-e-2 (edits not supported by dall-e-3)
-      let response = await sendEdit("gpt-image-1");
+      let response = await sendEdit("gpt-image-1", this.getOpenAiSize(imageShape));
       let usedModel = "gpt-image-1";
 
       if (!response.ok) {
         const firstStatus = response.status;
         const firstBody = await response.json().catch(() => ({}));
         log.warn({ status: firstStatus, detail: firstBody?.error?.message }, "gpt-image-1 edit failed, trying dall-e-2");
-        response = await sendEdit("dall-e-2");
+        response = await sendEdit("dall-e-2", this.getDallE2Size());
         usedModel = "dall-e-2";
       }
 
