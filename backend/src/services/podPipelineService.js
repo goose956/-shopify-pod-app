@@ -535,11 +535,13 @@ class PodPipelineService {
         filename = `reference.${contentType.includes("jpeg") ? "jpg" : "png"}`;
       }
 
+      const size = this.getOpenAiSize(imageShape);
+
       const sendEdit = async () => {
         const form = new FormData();
-        form.append("model", "dall-e-2");
+        form.append("model", "gpt-image-1");
         form.append("prompt", prompt);
-        form.append("size", "1024x1024");
+        form.append("size", size);
         form.append("image", imageBlob, filename);
         return fetch("https://api.openai.com/v1/images/edits", {
           method: "POST",
@@ -548,16 +550,16 @@ class PodPipelineService {
         });
       };
 
-      log.info({ promptLen: prompt.length }, "Calling OpenAI dall-e-2 image edit");
+      log.info({ model: "gpt-image-1", size, promptLen: prompt.length }, "Calling OpenAI image edit with reference image");
       const response = await sendEdit();
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        log.error({ status: response.status, detail: errBody?.error?.message }, "dall-e-2 edit failed");
+        log.error({ status: response.status, detail: errBody?.error?.message }, "gpt-image-1 edit failed");
         return null;
       }
 
-      this._trackCost({ provider: "openai", model: "dall-e-2", operation: "edit" });
+      this._trackCost({ provider: "openai", model: "gpt-image-1", operation: "edit" });
 
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
