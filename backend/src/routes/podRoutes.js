@@ -726,6 +726,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         },
       });
     } catch (error) {
+      log.error({ err: error?.message, stack: error?.stack?.split?.('\n')?.slice(0, 5) }, "design-preview route error");
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to generate design preview",
       });

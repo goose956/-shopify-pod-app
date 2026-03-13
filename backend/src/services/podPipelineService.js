@@ -444,60 +444,46 @@ class PodPipelineService {
 
   async generateOpenAiImage({ prompt, openAiApiKey, imageShape }) {
     if (!this.isUsableApiKey(openAiApiKey)) {
+      log.warn({}, "OpenAI key missing or invalid — skipping image generation");
       return null;
     }
 
-    const attemptGeneration = async (model, size, extraBody = {}) => {
+    const size = this.getDallE3Size(imageShape);
+    log.info({ size, promptLen: prompt.length }, "Calling OpenAI dall-e-3 image generation");
+
+    try {
       const response = await fetch("https://api.openai.com/v1/images/generations", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${openAiApiKey}`,
         },
-        body: JSON.stringify({ model, prompt, size, ...extraBody }),
+        body: JSON.stringify({ model: "dall-e-3", prompt, size, response_format: "url", n: 1 }),
       });
-      return response;
-    };
-
-    try {
-      // Try gpt-image-1 first; fall back to dall-e-3 if unavailable
-      let response = await attemptGeneration("gpt-image-1", this.getOpenAiSize(imageShape));
-      let usedModel = "gpt-image-1";
-
-      if (!response.ok) {
-        const firstStatus = response.status;
-        const firstBody = await response.json().catch(() => ({}));
-        log.warn({ status: firstStatus, detail: firstBody?.error?.message }, "gpt-image-1 failed, trying dall-e-3");
-        response = await attemptGeneration("dall-e-3", this.getDallE3Size(imageShape), { response_format: "url" });
-        usedModel = "dall-e-3";
-      }
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        const msg = errBody?.error?.message || `OpenAI image generation failed (${response.status})`;
-        log.error({ status: response.status, detail: msg }, "OpenAI generateOpenAiImage error");
+        log.error({ status: response.status, detail: errBody?.error?.message }, "dall-e-3 generation failed");
         return null;
       }
 
-      this._trackCost({ provider: "openai", model: usedModel, operation: "generate" });
+      this._trackCost({ provider: "openai", model: "dall-e-3", operation: "generate" });
 
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
       if (url) {
-        // Persist to disk so the temporary URL doesn't expire
         const localUrl = await downloadUrlToDisk(this.uploadsDir, url);
         return localUrl || url;
       }
 
-      // gpt-image-1 returns b64_json — save to disk and return a local URL
       const b64 = payload?.data?.[0]?.b64_json;
       if (b64) {
         const localUrl = saveBase64ToDisk(this.uploadsDir, b64, "image/png");
         if (localUrl) return localUrl;
-        // Fallback to data URI if disk save fails
         return `data:image/png;base64,${b64}`;
       }
 
+      log.warn({}, "OpenAI returned OK but no image data");
       return null;
     } catch (err) {
       log.error({ err: err?.message }, "OpenAI generateOpenAiImage exception");
@@ -549,42 +535,29 @@ class PodPipelineService {
         filename = `reference.${contentType.includes("jpeg") ? "jpg" : "png"}`;
       }
 
-      const buildForm = (model, size) => {
+      const sendEdit = async () => {
         const form = new FormData();
-        form.append("model", model);
+        form.append("model", "dall-e-2");
         form.append("prompt", prompt);
-        form.append("size", size);
+        form.append("size", "1024x1024");
         form.append("image", imageBlob, filename);
-        return form;
-      };
-
-      const sendEdit = async (model, size) => {
         return fetch("https://api.openai.com/v1/images/edits", {
           method: "POST",
           headers: { Authorization: `Bearer ${openAiApiKey}` },
-          body: buildForm(model, size),
+          body: form,
         });
       };
 
-      // Try gpt-image-1; fall back to dall-e-2 (edits not supported by dall-e-3)
-      let response = await sendEdit("gpt-image-1", this.getOpenAiSize(imageShape));
-      let usedModel = "gpt-image-1";
-
-      if (!response.ok) {
-        const firstStatus = response.status;
-        const firstBody = await response.json().catch(() => ({}));
-        log.warn({ status: firstStatus, detail: firstBody?.error?.message }, "gpt-image-1 edit failed, trying dall-e-2");
-        response = await sendEdit("dall-e-2", this.getDallE2Size());
-        usedModel = "dall-e-2";
-      }
+      log.info({ promptLen: prompt.length }, "Calling OpenAI dall-e-2 image edit");
+      const response = await sendEdit();
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        log.error({ status: response.status, detail: errBody?.error?.message }, "OpenAI generateOpenAiImageEdit error");
+        log.error({ status: response.status, detail: errBody?.error?.message }, "dall-e-2 edit failed");
         return null;
       }
 
-      this._trackCost({ provider: "openai", model: usedModel, operation: "edit" });
+      this._trackCost({ provider: "openai", model: "dall-e-2", operation: "edit" });
 
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
