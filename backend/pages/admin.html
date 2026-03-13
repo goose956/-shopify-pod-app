@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ListingLab Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f6f6f7; color: #1a1a1a; }
+    .header { background: #1a1a2e; color: #fff; padding: 20px 32px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { font-size: 20px; font-weight: 600; }
+    .header .status { font-size: 13px; color: #aaa; }
+    .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: #6d7175; margin-bottom: 12px; }
+    .stat-value { font-size: 32px; font-weight: 700; color: #1a1a2e; }
+    .stat-label { font-size: 13px; color: #6d7175; margin-top: 4px; }
+    .section { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 24px; }
+    .section h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #e1e3e5; color: #6d7175; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f1f2f3; }
+    tr:hover td { background: #f9fafb; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+    .badge-green { background: #e4f5e9; color: #1a7f37; }
+    .badge-red { background: #fce8e8; color: #c41e3a; }
+    .badge-blue { background: #e8f0fe; color: #1a56db; }
+    .badge-gray { background: #f1f2f3; color: #6d7175; }
+    .badge-gold { background: #fef3c7; color: #92400e; }
+    .btn { display: inline-block; padding: 6px 14px; border: none; border-radius: 6px; font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+    .btn-primary { background: #1a1a2e; color: #fff; }
+    .btn-primary:hover { background: #2d2d4e; }
+    .btn-danger { background: #c41e3a; color: #fff; }
+    .btn-danger:hover { background: #a01830; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot-green { background: #22c55e; }
+    .dot-red { background: #ef4444; }
+    .dot-gray { background: #9ca3af; }
+    .loading { text-align: center; padding: 40px; color: #6d7175; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1a1a2e; color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px; z-index: 1000; transform: translateY(100px); opacity: 0; transition: all 0.3s; }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .refresh-btn { background: none; border: 1px solid rgba(255,255,255,0.3); color: #fff; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+    .refresh-btn:hover { border-color: #fff; }
+    .diag-item { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f1f2f3; font-size: 14px; }
+    .diag-item:last-child { border-bottom: none; }
+    .empty-state { text-align: center; padding: 32px; color: #6d7175; font-size: 14px; }
+    @media (max-width: 640px) { .container { padding: 0 8px; } .section { padding: 16px; } table { font-size: 13px; } th, td { padding: 8px 6px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>ListingLab Admin</h1>
+      <div class="status" id="lastRefresh">Loading...</div>
+    </div>
+    <button class="refresh-btn" onclick="loadAll()">&#8635; Refresh</button>
+  </div>
+
+  <div class="container">
+    <!-- Summary cards -->
+    <div class="grid" id="summaryCards">
+      <div class="card"><div class="loading">Loading...</div></div>
+    </div>
+
+    <!-- Shops table -->
+    <div class="section">
+      <h2>
+        Shops
+        <button class="btn btn-primary btn-sm" onclick="resetAllCredits()">Reset All Credits</button>
+      </h2>
+      <div id="shopsTable"><div class="loading">Loading...</div></div>
+    </div>
+
+    <!-- Image storage -->
+    <div class="section">
+      <h2>Image Storage</h2>
+      <div id="imageStats"><div class="loading">Loading...</div></div>
+    </div>
+
+    <!-- Diagnostics -->
+    <div class="section">
+      <h2>
+        System Diagnostics
+        <button class="btn btn-primary btn-sm" onclick="runDiagnostics()">Run Check</button>
+      </h2>
+      <div id="diagnostics"><div class="empty-state">Click "Run Check" to test connectivity</div></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const secret = new URLSearchParams(window.location.search).get('secret') || '';
+    const headers = { 'Content-Type': 'application/json', 'X-Admin-Secret': secret };
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function planBadge(plan) {
+      const cls = plan === 'gold' ? 'badge-gold' : plan === 'pro' ? 'badge-blue' : 'badge-gray';
+      return `<span class="badge ${cls}">${plan}</span>`;
+    }
+
+    function tokenBadge(hasToken) {
+      return hasToken
+        ? '<span class="status-dot dot-green"></span>Active'
+        : '<span class="status-dot dot-red"></span>Missing';
+    }
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    async function apiFetch(path, opts = {}) {
+      const url = path + (path.includes('?') ? '&' : '?') + 'secret=' + encodeURIComponent(secret);
+      const resp = await fetch(url, { headers, ...opts });
+      if (resp.status === 401) { document.body.innerHTML = '<div style="padding:60px;text-align:center;font-family:sans-serif;"><h2>Access Denied</h2><p>Invalid or missing secret.</p></div>'; throw new Error('Unauthorized'); }
+      return resp.json();
+    }
+
+    async function loadShops() {
+      try {
+        const data = await apiFetch('/admin/api/shops');
+        const shops = data.shops || [];
+
+        // Summary cards
+        const totalShops = shops.length;
+        const activeShops = shops.filter(s => s.hasToken).length;
+        const totalCreditsUsed = shops.reduce((sum, s) => sum + (s.billingUsage?.credits || 0), 0);
+        const totalDesigns = shops.reduce((sum, s) => sum + (s.designCount || 0), 0);
+
+        document.getElementById('summaryCards').innerHTML = `
+          <div class="card"><h2>Total Shops</h2><div class="stat-value">${totalShops}</div><div class="stat-label">${activeShops} with active tokens</div></div>
+          <div class="card"><h2>Credits Used</h2><div class="stat-value">${totalCreditsUsed}</div><div class="stat-label">This billing period</div></div>
+          <div class="card"><h2>Total Designs</h2><div class="stat-value">${totalDesigns}</div><div class="stat-label">Across all shops</div></div>
+        `;
+
+        // Table
+        if (shops.length === 0) {
+          document.getElementById('shopsTable').innerHTML = '<div class="empty-state">No shops installed yet</div>';
+          return;
+        }
+
+        let html = `<table><thead><tr><th>Shop</th><th>Plan</th><th>Credits</th><th>Designs</th><th>Token</th><th>Actions</th></tr></thead><tbody>`;
+        for (const s of shops) {
+          const credits = s.billingUsage?.credits || 0;
+          const limit = s.billingPlan === 'gold' ? 400 : s.billingPlan === 'pro' ? 150 : 25;
+          html += `<tr>
+            <td><strong>${esc(s.domain)}</strong></td>
+            <td>${planBadge(s.billingPlan || 'free')}</td>
+            <td>${credits} / ${limit}</td>
+            <td>${s.designCount || 0}</td>
+            <td>${tokenBadge(s.hasToken)}</td>
+            <td><button class="btn btn-primary btn-sm" onclick="resetCredits('${esc(s.domain)}')">Reset</button></td>
+          </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('shopsTable').innerHTML = html;
+      } catch (err) {
+        document.getElementById('shopsTable').innerHTML = `<div class="empty-state">Error: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function loadImageStats() {
+      try {
+        const data = await apiFetch('/admin/api/image-stats');
+        const stats = data.stats || [];
+
+        // Update summary card with storage info
+        const totalImages = stats.reduce((sum, s) => sum + s.count, 0);
+        const totalSize = stats.reduce((sum, s) => sum + s.totalBytes, 0);
+
+        const cardsEl = document.getElementById('summaryCards');
+        // Append storage card if not already there
+        if (!cardsEl.querySelector('.storage-card')) {
+          const storageCard = document.createElement('div');
+          storageCard.className = 'card storage-card';
+          storageCard.innerHTML = `<h2>Image Storage</h2><div class="stat-value">${formatBytes(totalSize)}</div><div class="stat-label">${totalImages} images stored</div>`;
+          cardsEl.appendChild(storageCard);
+        }
+
+        if (stats.length === 0) {
+          document.getElementById('imageStats').innerHTML = '<div class="empty-state">No images stored in database yet</div>';
+          return;
+        }
+
+        let html = `<table><thead><tr><th>Shop</th><th>Images</th><th>Storage</th><th>Actions</th></tr></thead><tbody>`;
+        for (const s of stats) {
+          html += `<tr>
+            <td><strong>${esc(s.shopDomain)}</strong></td>
+            <td>${s.count}</td>
+            <td>${formatBytes(s.totalBytes)}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteImages('${esc(s.shopDomain)}')">Delete All</button></td>
+          </tr>`;
+        }
+        html += `</tbody></table>
+          <div style="margin-top:12px;font-size:13px;color:#6d7175;">Total: ${totalImages} images, ${formatBytes(totalSize)}</div>`;
+        document.getElementById('imageStats').innerHTML = html;
+      } catch (err) {
+        document.getElementById('imageStats').innerHTML = `<div class="empty-state">Error: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function runDiagnostics() {
+      document.getElementById('diagnostics').innerHTML = '<div class="loading">Running checks...</div>';
+      try {
+        const data = await apiFetch('/admin/api/diagnose');
+        let html = '';
+
+        // Env vars
+        for (const [key, val] of Object.entries(data.checks?.envVars || {})) {
+          const ok = val === 'set';
+          html += `<div class="diag-item"><span class="status-dot ${ok ? 'dot-green' : 'dot-red'}"></span><strong>${esc(key)}</strong>: ${ok ? 'Configured' : 'NOT SET'}</div>`;
+        }
+
+        // OpenAI
+        const oai = data.checks?.openAi || {};
+        const oaiOk = oai.status === 'CONNECTED';
+        html += `<div class="diag-item"><span class="status-dot ${oaiOk ? 'dot-green' : oai.status === 'NOT SET' ? 'dot-gray' : 'dot-red'}"></span><strong>OpenAI API</strong>: ${esc(oai.status)}${oai.httpStatus ? ' (HTTP ' + oai.httpStatus + ')' : ''}</div>`;
+
+        // Shopify tokens
+        for (const t of data.checks?.shopifyTokens || []) {
+          const ok = t.status === 'VALID';
+          html += `<div class="diag-item"><span class="status-dot ${ok ? 'dot-green' : 'dot-red'}"></span><strong>Shopify: ${esc(t.domain)}</strong>: ${esc(t.status)}${t.shopName ? ' (' + esc(t.shopName) + ')' : ''}${t.httpStatus ? ' HTTP ' + t.httpStatus : ''}</div>`;
+        }
+
+        document.getElementById('diagnostics').innerHTML = html || '<div class="empty-state">No checks available</div>';
+      } catch (err) {
+        document.getElementById('diagnostics').innerHTML = `<div class="empty-state">Error: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function resetCredits(shopDomain) {
+      if (!confirm(`Reset credits for ${shopDomain}?`)) return;
+      try {
+        await apiFetch('/admin/api/reset-credits', { method: 'POST', body: JSON.stringify({ shopDomain }) });
+        showToast(`Credits reset for ${shopDomain}`);
+        loadShops();
+      } catch (err) { showToast('Error: ' + err.message); }
+    }
+
+    async function resetAllCredits() {
+      if (!confirm('Reset credits for ALL shops?')) return;
+      try {
+        await apiFetch('/admin/api/reset-credits', { method: 'POST', body: JSON.stringify({}) });
+        showToast('All credits reset');
+        loadShops();
+      } catch (err) { showToast('Error: ' + err.message); }
+    }
+
+    async function deleteImages(shopDomain) {
+      if (!confirm(`Delete ALL images for ${shopDomain}? This cannot be undone.`)) return;
+      try {
+        const data = await apiFetch('/admin/api/delete-images', { method: 'POST', body: JSON.stringify({ shopDomain }) });
+        showToast(`Deleted ${data.deleted} images for ${shopDomain}`);
+        loadImageStats();
+      } catch (err) { showToast('Error: ' + err.message); }
+    }
+
+    function esc(str) {
+      const div = document.createElement('div');
+      div.textContent = String(str || '');
+      return div.innerHTML;
+    }
+
+    async function loadAll() {
+      document.getElementById('lastRefresh').textContent = 'Refreshing...';
+      await Promise.all([loadShops(), loadImageStats()]);
+      document.getElementById('lastRefresh').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>

@@ -20,11 +20,25 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
   const router = express.Router();
   const uploadsDir = config?.storage?.uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
 
-  /** Download an external http(s) URL to local uploads dir and return a /uploads/ path. */
-  async function persistImageUrl(imageUrl) {
+  /** Download an external http(s) URL to DB (or local uploads dir as fallback) and return an image path. */
+  async function persistImageUrl(imageUrl, shopDomain) {
     if (!imageUrl || typeof imageUrl !== "string") return imageUrl;
+    // Already persisted to DB or local uploads
+    if (imageUrl.startsWith("/images/") || imageUrl.startsWith("/uploads/")) return imageUrl;
     if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return imageUrl;
     try {
+      // Try DB storage first
+      if (pipelineService?.store?.saveImage && shopDomain) {
+        const resp = await fetch(imageUrl);
+        if (!resp.ok) return imageUrl;
+        const ct = resp.headers.get("content-type") || "image/png";
+        const buffer = Buffer.from(await resp.arrayBuffer());
+        const id = randomUUID();
+        await pipelineService.store.saveImage({ id, shopDomain, data: buffer, mimeType: ct });
+        log.info({ id }, "Persisted external image to database");
+        return `/images/${id}`;
+      }
+      // Fallback: local disk
       if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
       const resp = await fetch(imageUrl);
       if (!resp.ok) return imageUrl;
@@ -519,6 +533,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         kieGenerateUrl,
         maxWaitMs: 15000,
         pollIntervalMs: 2000,
+        shopDomain: session.shopDomain,
       });
 
       return res.json({
@@ -682,6 +697,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         imageShape,
         maxWaitMs: 30000,
         pollIntervalMs: 2500,
+        shopDomain: session.shopDomain,
       });
       const rawArtworkUrl = designResult.imageUrl;
 
@@ -863,6 +879,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         imageShape,
         maxWaitMs: 30000,
         pollIntervalMs: 2500,
+        shopDomain: session.shopDomain,
       });
 
       const designImageUrl = mockupResult.imageUrl;
@@ -949,6 +966,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         referenceImageUrl: referenceUrl,
         maxWaitMs: 20000,
         pollIntervalMs: 2500,
+        shopDomain: session.shopDomain,
       });
 
       if (designResult.provider !== "openai" && designResult.provider !== "kie") {
@@ -965,6 +983,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           referenceImageUrl: shouldRetryWithoutReference ? undefined : referenceUrl,
           maxWaitMs: 70000,
           pollIntervalMs: 3000,
+          shopDomain: session.shopDomain,
         });
       }
 
@@ -1042,15 +1061,25 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         return res.status(400).json({ error: "Invalid image data format. Expected base64 data URL." });
       }
       const ext = base64Match[1] === "jpeg" ? "jpg" : base64Match[1];
+      const mimeType = ext === "jpg" ? "image/jpeg" : `image/${base64Match[1]}`;
       const buffer = Buffer.from(base64Match[2], "base64");
 
-      if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-      const filename = `${randomUUID()}-edited.${ext}`;
-      const filePath = path.join(uploadsDir, filename);
-      fs.writeFileSync(filePath, buffer);
-
-      const editedUrl = `/uploads/${filename}`;
-      log.info({ filename, sizeKB: (buffer.length / 1024).toFixed(1) }, "Saved edited artwork from canvas editor");
+      let editedUrl;
+      // Try DB storage first
+      if (pipelineService?.store?.saveImage) {
+        const id = randomUUID();
+        await pipelineService.store.saveImage({ id, shopDomain: session.shopDomain, data: buffer, mimeType });
+        editedUrl = `/images/${id}`;
+        log.info({ id, sizeKB: (buffer.length / 1024).toFixed(1) }, "Saved edited artwork from canvas editor to database");
+      } else {
+        // Fallback: local disk
+        if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+        const filename = `${randomUUID()}-edited.${ext}`;
+        const filePath = path.join(uploadsDir, filename);
+        fs.writeFileSync(filePath, buffer);
+        editedUrl = `/uploads/${filename}`;
+        log.info({ filename, sizeKB: (buffer.length / 1024).toFixed(1) }, "Saved edited artwork from canvas editor");
+      }
 
       // Save as asset
       const editedAsset = assetStorageService.saveAsset({
@@ -1165,6 +1194,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           lifestylePrompts: requestedLifestylePrompts,
           maxWaitMs: 30000,
           pollIntervalMs: 2500,
+          shopDomain: session.shopDomain,
         });
         log.info({ provider: lifestyleResult.provider, imageCount: lifestyleResult.imageUrls?.length || 0 }, "Finalize step 1 complete");
       } catch (imgErr) {
@@ -1183,7 +1213,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       // ── Step 1c: Persist external URLs to disk ──────────────────────────
       try {
         for (let i = 0; i < lifestyleImages.length; i++) {
-          lifestyleImages[i] = await persistImageUrl(lifestyleImages[i]);
+          lifestyleImages[i] = await persistImageUrl(lifestyleImages[i], session.shopDomain);
         }
       } catch (persistErr) {
         log.warn({ err: persistErr?.message }, "Image persistence warning");

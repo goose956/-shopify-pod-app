@@ -114,81 +114,151 @@ async function createServer() {
   app.get("/admin/reset-credits", handleResetCredits);
   app.post("/admin/reset-credits", handleResetCredits);
 
-  // ── Admin: diagnose image generation (no Shopify session needed) ───────
-  app.get("/admin/diagnose", async (req, res) => {
-    // PRODUCTION GUARD: disabled in production to prevent info leakage
-    if (process.env.NODE_ENV === "production") {
-      return res.status(404).json({ error: "Not available" });
-    }
-    const secret = String(req.query.secret || "").trim();
+  // ── Admin: secret auth middleware ─────────────────────────────────────────
+  function adminAuth(req, res, next) {
+    const secret = String(req.query.secret || req.headers["x-admin-secret"] || "").trim();
     if (!config.dev.setupSecret || secret !== config.dev.setupSecret) {
       return res.status(401).json({ error: "Invalid or missing secret" });
     }
+    next();
+  }
+
+  // ── Admin Dashboard (self-contained HTML page) ────────────────────────────
+  app.get("/admin", adminAuth, (_req, res) => {
+    res.sendFile(path.join(__dirname, "..", "pages", "admin.html"));
+  });
+
+  // ── Admin API: list shops ─────────────────────────────────────────────────
+  app.get("/admin/api/shops", adminAuth, async (req, res) => {
+    if (!_settingsRepository) return res.status(503).json({ error: "App still initialising" });
+    try {
+      const db = _settingsRepository.store.read();
+      const shops = (db.settings || [])
+        .filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics")
+        .map(s => ({
+          domain: s.shopDomain,
+          hasToken: Boolean(s.shopifyAccessToken),
+          billingPlan: s.billingPlan || "free",
+          billingUsage: s.billingUsage || { credits: 0, periodStart: null },
+          installedAt: s.installedAt || null,
+        }));
+
+      // Count designs per shop
+      const designs = db.designs || [];
+      for (const shop of shops) {
+        shop.designCount = designs.filter(d => d.shopDomain === shop.domain).length;
+      }
+
+      return res.json({ shops });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin API: image storage stats ────────────────────────────────────────
+  app.get("/admin/api/image-stats", adminAuth, async (req, res) => {
+    try {
+      if (store?.getImageStats) {
+        const stats = await store.getImageStats();
+        return res.json({ stats });
+      }
+      return res.json({ stats: [], message: "No database storage available" });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin API: diagnose connectivity ──────────────────────────────────────
+  app.get("/admin/api/diagnose", adminAuth, async (req, res) => {
     const results = { timestamp: new Date().toISOString(), checks: {} };
 
-    // 1. Check env vars (presence only, no values)
     results.checks.envVars = {
       OPENAI_API_KEY: config.defaults.openAiApiKey ? "set" : "NOT SET",
       DATABASE_URL: config.storage.databaseUrl ? "set" : "NOT SET",
     };
 
-    // 2. Check DB + shop settings (no tokens or key values exposed)
+    // Test Shopify tokens
     if (_settingsRepository) {
       const db = _settingsRepository.store.read();
-      const shops = (db.settings || []).filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics");
-      results.checks.shops = shops.map(s => ({
-        domain: s.shopDomain,
-        hasToken: Boolean(s.shopifyAccessToken),
-        billingUsage: s.billingUsage || { credits: 0 },
-        billingPlan: s.billingPlan || "free",
-      }));
-
-      // 3. Test Shopify token for each shop (GraphQL — no REST)
-      for (const shopInfo of results.checks.shops) {
-        if (shopInfo.hasToken) {
-          try {
-            const shopSettings = _settingsRepository.findByShop(shopInfo.domain);
-            const token = shopSettings?.shopifyAccessToken;
-            const testResp = await fetch(
-              `https://${shopInfo.domain}/admin/api/${config.shopify.apiVersion}/graphql.json`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
-                body: JSON.stringify({ query: "{ shop { name } }" }),
-              }
-            );
-            if (testResp.ok) {
-              const data = await testResp.json();
-              shopInfo.shopifyTokenTest = { result: "VALID", shopName: data?.data?.shop?.name || "unknown" };
-            } else {
-              shopInfo.shopifyTokenTest = { result: "INVALID", status: testResp.status };
+      const shops = (db.settings || []).filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics" && s.shopifyAccessToken);
+      results.checks.shopifyTokens = [];
+      for (const s of shops) {
+        try {
+          const testResp = await fetch(
+            `https://${s.shopDomain}/admin/api/${config.shopify.apiVersion}/graphql.json`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": s.shopifyAccessToken },
+              body: JSON.stringify({ query: "{ shop { name } }" }),
             }
-          } catch (err) {
-            shopInfo.shopifyTokenTest = { result: "ERROR", error: err.message };
+          );
+          if (testResp.ok) {
+            const data = await testResp.json();
+            results.checks.shopifyTokens.push({ domain: s.shopDomain, status: "VALID", shopName: data?.data?.shop?.name });
+          } else {
+            results.checks.shopifyTokens.push({ domain: s.shopDomain, status: "INVALID", httpStatus: testResp.status });
           }
+        } catch (err) {
+          results.checks.shopifyTokens.push({ domain: s.shopDomain, status: "ERROR", error: err.message });
         }
       }
     }
 
-    // 4. Test OpenAI connectivity with a free models list call (no image generation = no cost)
-    const openAiKey = config.defaults.openAiApiKey;
-    if (openAiKey) {
+    // Test OpenAI
+    if (config.defaults.openAiApiKey) {
       try {
         const testResp = await fetch("https://api.openai.com/v1/models", {
-          headers: { Authorization: `Bearer ${openAiKey}` },
+          headers: { Authorization: `Bearer ${config.defaults.openAiApiKey}` },
         });
-        results.checks.openAiTest = {
-          result: testResp.ok ? "CONNECTED" : "FAILED",
-          status: testResp.status,
-        };
+        results.checks.openAi = { status: testResp.ok ? "CONNECTED" : "FAILED", httpStatus: testResp.status };
       } catch (err) {
-        results.checks.openAiTest = { result: "EXCEPTION", error: err.message };
+        results.checks.openAi = { status: "ERROR", error: err.message };
       }
     } else {
-      results.checks.openAiTest = { result: "SKIPPED", reason: "No API key configured" };
+      results.checks.openAi = { status: "NOT SET" };
     }
 
     return res.json(results);
+  });
+
+  // ── Admin API: reset credits for a specific shop ──────────────────────────
+  app.post("/admin/api/reset-credits", adminAuth, async (req, res) => {
+    if (!_settingsRepository) return res.status(503).json({ error: "App still initialising" });
+    try {
+      const shopDomain = String(req.body?.shopDomain || "").trim();
+      const db = _settingsRepository.store.read();
+      const periodStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      let resetCount = 0;
+      for (const s of db.settings) {
+        if (shopDomain && s.shopDomain !== shopDomain) continue;
+        if (s.billingUsage) {
+          s.billingUsage = { credits: 0, periodStart };
+          resetCount++;
+        }
+      }
+      _settingsRepository.store.write(db);
+      return res.json({ ok: true, resetCount });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin API: delete images for a specific shop ──────────────────────────
+  app.post("/admin/api/delete-images", adminAuth, async (req, res) => {
+    try {
+      const shopDomain = String(req.body?.shopDomain || "").trim();
+      if (!shopDomain) return res.status(400).json({ error: "shopDomain is required" });
+      if (!store?.deleteShopImages) return res.status(400).json({ error: "No database storage" });
+      const deleted = await store.deleteShopImages(shopDomain);
+      return res.json({ ok: true, deleted });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Legacy admin/diagnose redirect ────────────────────────────────────────
+  app.get("/admin/diagnose", adminAuth, (req, res) => {
+    res.redirect(`/admin/api/diagnose?secret=${encodeURIComponent(req.query.secret)}`);
   });
 
   // ── Body parsing (skip /webhooks — they need raw body for HMAC) ────────────
@@ -205,6 +275,27 @@ async function createServer() {
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
   }, express.static(uploadsDir, { maxAge: "7d" }));
+
+  // ── Serve DB-backed images ────────────────────────────────────────────────
+  app.get("/images/:id", async (req, res) => {
+    try {
+      if (!store?.getImage) return res.status(404).send("Not found");
+      const id = req.params.id;
+      // Validate UUID format to prevent injection
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return res.status(400).send("Invalid image ID");
+      }
+      const image = await store.getImage(id);
+      if (!image) return res.status(404).send("Not found");
+      res.setHeader("Content-Type", image.mimeType || "image/png");
+      res.setHeader("Cache-Control", "public, max-age=604800");
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.send(image.data);
+    } catch (err) {
+      log.error({ err: err?.message }, "Error serving image from DB");
+      res.status(500).send("Internal error");
+    }
+  });
 
   // ── Serve built frontend (no DB needed – register before listen) ──────────
   const frontendDist = path.join(__dirname, "..", "..", "web", "frontend", "dist");
@@ -226,7 +317,7 @@ async function createServer() {
   // redirect to the OAuth install flow so the token is obtained before the app loads.
   let _settingsRepository = null; // populated after DB init
   app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path === "/health" || req.path === "/privacy" || req.path === "/terms") {
+    if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path.startsWith("/images/") || req.path.startsWith("/admin") || req.path === "/health" || req.path === "/privacy" || req.path === "/terms") {
       return next();
     }
 
@@ -296,11 +387,12 @@ async function createServer() {
   webhookDeps.memberRepository = memberRepository;
   webhookDeps.assetRepository = assetRepository;
   webhookDeps.productRepository = productRepository;
+  webhookDeps.store = store;
 
   const authService = new AuthService(config);
   const memberAuthService = new MemberAuthService(memberRepository);
   const analyticsService = new AnalyticsService(settingsRepository);
-  const pipelineService = new PodPipelineService(uploadsDir);
+  const pipelineService = new PodPipelineService(uploadsDir, store);
   const assetStorageService = new AssetStorageService(assetRepository);
   const publishService = new ShopifyPublishService(config, settingsRepository);
   const printfulMockupService = new PrintfulMockupService(uploadsDir);

@@ -70,12 +70,12 @@ function createWebhookRouter(deps) {
   // ── shop/redact ────────────────────────────────────────────────────────────
   // Shopify sends this 48 hours after an app is uninstalled.
   // Delete ALL data associated with this shop from the database.
-  router.post("/shop/redact", (req, res) => {
+  router.post("/shop/redact", async (req, res) => {
     const { shop_domain } = req.body;
     log.info({ shop_domain }, "GDPR shop/redact — purging all shop data");
 
     try {
-      _purgeShopData(shop_domain, deps);
+      await _purgeShopData(shop_domain, deps);
       log.info({ shop_domain }, "GDPR shop/redact complete");
     } catch (err) {
       log.error({ shop_domain, err: err?.message }, "GDPR shop/redact error");
@@ -124,7 +124,7 @@ function createWebhookRouter(deps) {
    * Purge all data for a given shop domain.
    * Called by shop/redact (48h after uninstall).
    */
-  function _purgeShopData(shopDomain, deps) {
+  async function _purgeShopData(shopDomain, deps) {
     if (!shopDomain) return;
     const { designRepository, assetRepository, productRepository, settingsRepository } = deps;
     const uploadsDir = deps.uploadsDir;
@@ -172,6 +172,16 @@ function createWebhookRouter(deps) {
     if (settingsRepository) {
       settingsRepository.deleteByShop(shopDomain);
       log.info({ shopDomain }, "Purged settings");
+    }
+
+    // Delete all DB-backed images for this shop
+    if (deps.store?.deleteShopImages) {
+      try {
+        const deleted = await deps.store.deleteShopImages(shopDomain);
+        log.info({ shopDomain, deleted }, "Purged DB images");
+      } catch (err) {
+        log.warn({ shopDomain, err: err?.message }, "Error purging DB images");
+      }
     }
   }
 

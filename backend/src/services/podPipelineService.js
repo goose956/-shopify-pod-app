@@ -3,6 +3,74 @@ const fs = require("fs");
 const path = require("path");
 const log = require("../utils/logger");
 
+/**
+ * Save a base64 image to the database via store.saveImage().
+ * Falls back to disk if store is not available (dev/JSON mode).
+ */
+async function saveBase64Image(store, shopDomain, base64Data, mimeType = "image/png") {
+  try {
+    const id = randomUUID();
+    const buffer = Buffer.from(base64Data, "base64");
+
+    if (store?.saveImage) {
+      await store.saveImage({ id, shopDomain, data: buffer, mimeType });
+      log.info({ sizeKB: (buffer.length / 1024).toFixed(0), id, shopDomain }, "Image saved to database");
+      return `/images/${id}`;
+    }
+
+    // Fallback: save to disk (dev mode with JsonStore)
+    const uploadsDir = path.join(__dirname, "..", "..", "data", "uploads");
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const ext = mimeType.includes("webp") ? "webp" : mimeType.includes("jpeg") || mimeType.includes("jpg") ? "jpg" : "png";
+    const filename = `${id}.${ext}`;
+    fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+    log.info({ sizeKB: (buffer.length / 1024).toFixed(0), filename }, "Image saved to disk (fallback)");
+    return `/uploads/${filename}`;
+  } catch (err) {
+    log.error({ err: err?.message }, "Failed to save base64 image");
+    return null;
+  }
+}
+
+/**
+ * Download an external URL and save the image to the database.
+ * Falls back to disk if store is not available.
+ */
+async function downloadAndSaveImage(store, shopDomain, imageUrl) {
+  try {
+    if (!imageUrl || typeof imageUrl !== "string") return null;
+    if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return null;
+
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      log.error({ status: response.status, url: imageUrl.slice(0, 80) }, "Failed to download image URL");
+      return null;
+    }
+    const contentType = response.headers.get("content-type") || "image/png";
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const id = randomUUID();
+
+    if (store?.saveImage) {
+      await store.saveImage({ id, shopDomain, data: buffer, mimeType: contentType });
+      log.info({ sizeKB: (buffer.length / 1024).toFixed(0), id, shopDomain }, "Image downloaded and saved to database");
+      return `/images/${id}`;
+    }
+
+    // Fallback: save to disk
+    const uploadsDir = path.join(__dirname, "..", "..", "data", "uploads");
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const ext = contentType.includes("webp") ? "webp" : contentType.includes("jpeg") || contentType.includes("jpg") ? "jpg" : "png";
+    const filename = `${id}.${ext}`;
+    fs.writeFileSync(path.join(uploadsDir, filename), buffer);
+    log.info({ sizeKB: (buffer.length / 1024).toFixed(0), filename }, "Image downloaded to disk (fallback)");
+    return `/uploads/${filename}`;
+  } catch (err) {
+    log.error({ err: err?.message }, "Failed to download and save image");
+    return null;
+  }
+}
+
+// Keep old functions for backward compatibility during transition
 function saveBase64ToDisk(uploadsDir, base64Data, mimeType = "image/png") {
   try {
     if (!fs.existsSync(uploadsDir)) {
@@ -23,7 +91,6 @@ function saveBase64ToDisk(uploadsDir, base64Data, mimeType = "image/png") {
 async function downloadUrlToDisk(uploadsDir, imageUrl) {
   try {
     if (!imageUrl || typeof imageUrl !== "string") return null;
-    // Only download external http(s) URLs — skip local paths, data URIs, etc.
     if (!imageUrl.startsWith("http://") && !imageUrl.startsWith("https://")) return null;
     if (!fs.existsSync(uploadsDir)) {
       fs.mkdirSync(uploadsDir, { recursive: true });
@@ -48,8 +115,9 @@ async function downloadUrlToDisk(uploadsDir, imageUrl) {
 }
 
 class PodPipelineService {
-  constructor(uploadsDir) {
+  constructor(uploadsDir, store) {
     this.uploadsDir = uploadsDir || path.join(__dirname, "..", "..", "data", "uploads");
+    this.store = store || null;
   }
 
   _trackCost({ provider, model, operation }) {
@@ -389,7 +457,7 @@ class PodPipelineService {
     return `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
   }
 
-  async generateDesignImage({ artworkPrompt, openAiApiKey, keiAiApiKey, kieGenerateUrl, referenceImageUrl, imageShape, maxWaitMs, pollIntervalMs }) {
+  async generateDesignImage({ artworkPrompt, openAiApiKey, keiAiApiKey, kieGenerateUrl, referenceImageUrl, imageShape, maxWaitMs, pollIntervalMs, shopDomain }) {
     if (!this.isUsableApiKey(openAiApiKey)) {
       return {
         imageUrl: this._placeholderDataUri(artworkPrompt.slice(0, 48)),
@@ -408,6 +476,7 @@ class PodPipelineService {
         referenceImageUrl,
         openAiApiKey,
         imageShape,
+        shopDomain,
       });
       usedReferenceImage = Boolean(openAiImageUrl);
       if (!usedReferenceImage) {
@@ -424,6 +493,7 @@ class PodPipelineService {
         prompt: openAiPrompt,
         openAiApiKey,
         imageShape,
+        shopDomain,
       });
     }
 
@@ -446,7 +516,7 @@ class PodPipelineService {
     };
   }
 
-  async generateOpenAiImage({ prompt, openAiApiKey, imageShape }) {
+  async generateOpenAiImage({ prompt, openAiApiKey, imageShape, shopDomain }) {
     if (!this.isUsableApiKey(openAiApiKey)) {
       log.warn({}, "OpenAI key missing or invalid — skipping image generation");
       return null;
@@ -476,14 +546,14 @@ class PodPipelineService {
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
       if (url) {
-        const localUrl = await downloadUrlToDisk(this.uploadsDir, url);
-        return localUrl || url;
+        const savedUrl = await downloadAndSaveImage(this.store, shopDomain, url);
+        return savedUrl || url;
       }
 
       const b64 = payload?.data?.[0]?.b64_json;
       if (b64) {
-        const localUrl = saveBase64ToDisk(this.uploadsDir, b64, "image/png");
-        if (localUrl) return localUrl;
+        const savedUrl = await saveBase64Image(this.store, shopDomain, b64, "image/png");
+        if (savedUrl) return savedUrl;
         return `data:image/png;base64,${b64}`;
       }
 
@@ -495,7 +565,7 @@ class PodPipelineService {
     }
   }
 
-  async generateOpenAiImageEdit({ prompt, referenceImageUrl, openAiApiKey, imageShape }) {
+  async generateOpenAiImageEdit({ prompt, referenceImageUrl, openAiApiKey, imageShape, shopDomain }) {
     if (!this.isUsableApiKey(openAiApiKey) || !String(referenceImageUrl || "").trim()) {
       log.warn({ hasKey: this.isUsableApiKey(openAiApiKey), hasRef: Boolean(referenceImageUrl) }, "generateOpenAiImageEdit: skipped (missing key or ref)");
       return null;
@@ -506,7 +576,6 @@ class PodPipelineService {
       let filename;
 
       if (String(referenceImageUrl).startsWith("data:")) {
-        // Convert data: URI to a Blob directly
         const match = referenceImageUrl.match(/^data:(image\/\w+);base64,(.+)$/);
         if (!match) {
           log.warn({}, "OpenAI generateOpenAiImageEdit: invalid data-URI format");
@@ -517,8 +586,19 @@ class PodPipelineService {
         const buffer = Buffer.from(base64Data, "base64");
         imageBlob = new Blob([buffer], { type: mimeType });
         filename = `reference.${mimeType.includes("jpeg") ? "jpg" : "png"}`;
+      } else if (String(referenceImageUrl).startsWith("/images/") && this.store?.getImage) {
+        // Read from PostgreSQL images table
+        const imageId = referenceImageUrl.replace("/images/", "");
+        const imgRecord = await this.store.getImage(imageId);
+        if (imgRecord) {
+          imageBlob = new Blob([imgRecord.data], { type: imgRecord.mimeType });
+          filename = `reference.${imgRecord.mimeType.includes("jpeg") ? "jpg" : "png"}`;
+        } else {
+          log.warn({ imageId }, "OpenAI generateOpenAiImageEdit: image not found in database");
+          return null;
+        }
       } else if (String(referenceImageUrl).startsWith("/uploads/")) {
-        // Read from local uploads directory
+        // Legacy: read from local uploads directory
         const localPath = path.join(this.uploadsDir, path.basename(referenceImageUrl));
         if (fs.existsSync(localPath)) {
           const buffer = fs.readFileSync(localPath);
@@ -571,15 +651,14 @@ class PodPipelineService {
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
       if (url) {
-        // Persist to disk so the temporary URL doesn't expire
-        const localUrl = await downloadUrlToDisk(this.uploadsDir, url);
-        return localUrl || url;
+        const savedUrl = await downloadAndSaveImage(this.store, shopDomain, url);
+        return savedUrl || url;
       }
 
       const b64Edit = payload?.data?.[0]?.b64_json;
       if (b64Edit) {
-        const localUrl = saveBase64ToDisk(this.uploadsDir, b64Edit, "image/png");
-        if (localUrl) return localUrl;
+        const savedUrl = await saveBase64Image(this.store, shopDomain, b64Edit, "image/png");
+        if (savedUrl) return savedUrl;
         return `data:image/png;base64,${b64Edit}`;
       }
 
@@ -590,7 +669,7 @@ class PodPipelineService {
     }
   }
 
-  async generateLifestyleImages({ productType, baseDesignImageUrl, designConcept, keiAiApiKey, kieEditUrl, openAiApiKey, stabilityApiKey, lifestylePrompts, maxWaitMs, pollIntervalMs }) {
+  async generateLifestyleImages({ productType, baseDesignImageUrl, designConcept, keiAiApiKey, kieEditUrl, openAiApiKey, stabilityApiKey, lifestylePrompts, maxWaitMs, pollIntervalMs, shopDomain }) {
     const defaultPrompts = [
       `Place this exact ${productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
       `Show this exact ${productType} product in a clean, minimal flat-lay arrangement on a light surface. Keep the product design exactly as shown in the reference image.`,
@@ -624,6 +703,7 @@ class PodPipelineService {
           prompt,
           referenceImageUrl: baseDesignImageUrl,
           openAiApiKey,
+          shopDomain,
         });
         if (imageUrl) {
           log.info({}, "Lifestyle image edit succeeded — reference design used");
@@ -637,6 +717,7 @@ class PodPipelineService {
         imageUrl = await this.generateOpenAiImage({
           prompt,
           openAiApiKey,
+          shopDomain,
         });
       }
 

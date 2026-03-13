@@ -38,13 +38,27 @@ class PostgresStore {
   async _init() {
     const client = await this.pool.connect();
     try {
-      // Create table if not exists
+      // Create JSONB table if not exists
       await client.query(`
         CREATE TABLE IF NOT EXISTS app_data (
           id INTEGER PRIMARY KEY DEFAULT 1,
           data JSONB NOT NULL DEFAULT '{}'::jsonb,
           updated_at TIMESTAMPTZ DEFAULT NOW()
         );
+      `);
+
+      // Create images table for per-shop image storage
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS images (
+          id UUID PRIMARY KEY,
+          shop_domain TEXT NOT NULL,
+          data BYTEA NOT NULL,
+          mime_type TEXT NOT NULL DEFAULT 'image/png',
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+      `);
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS idx_images_shop ON images (shop_domain);
       `);
 
       // Ensure a row exists
@@ -129,6 +143,64 @@ class PostgresStore {
    */
   async flush() {
     await this._persist();
+  }
+
+  /**
+   * Save an image to the images table. Returns the UUID id.
+   */
+  async saveImage({ id, shopDomain, data, mimeType }) {
+    await this.pool.query(
+      "INSERT INTO images (id, shop_domain, data, mime_type) VALUES ($1, $2, $3, $4)",
+      [id, shopDomain, data, mimeType]
+    );
+    return id;
+  }
+
+  /**
+   * Get an image by UUID id. Returns { id, shopDomain, data, mimeType } or null.
+   */
+  async getImage(id) {
+    const result = await this.pool.query(
+      "SELECT id, shop_domain, data, mime_type FROM images WHERE id = $1",
+      [id]
+    );
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0];
+    return { id: row.id, shopDomain: row.shop_domain, data: row.data, mimeType: row.mime_type };
+  }
+
+  /**
+   * Delete all images for a shop (used on shop/redact GDPR webhook).
+   */
+  async deleteShopImages(shopDomain) {
+    const result = await this.pool.query(
+      "DELETE FROM images WHERE shop_domain = $1",
+      [shopDomain]
+    );
+    return result.rowCount;
+  }
+
+  /**
+   * Delete a single image by id.
+   */
+  async deleteImage(id) {
+    const result = await this.pool.query("DELETE FROM images WHERE id = $1", [id]);
+    return result.rowCount > 0;
+  }
+
+  /**
+   * Get image storage stats grouped by shop_domain.
+   * Returns array of { shopDomain, count, totalBytes }.
+   */
+  async getImageStats() {
+    const result = await this.pool.query(
+      "SELECT shop_domain, COUNT(*)::int AS count, COALESCE(SUM(LENGTH(data)), 0)::bigint AS total_bytes FROM images GROUP BY shop_domain ORDER BY total_bytes DESC"
+    );
+    return result.rows.map(r => ({
+      shopDomain: r.shop_domain,
+      count: r.count,
+      totalBytes: Number(r.total_bytes),
+    }));
   }
 
   /** Graceful shutdown. */
