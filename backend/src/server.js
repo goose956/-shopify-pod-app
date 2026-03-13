@@ -114,6 +114,64 @@ async function createServer() {
   app.get("/admin/reset-credits", handleResetCredits);
   app.post("/admin/reset-credits", handleResetCredits);
 
+  // ── Admin: diagnose image generation (no Shopify session needed) ───────
+  app.get("/admin/diagnose", async (req, res) => {
+    const secret = String(req.query.secret || "").trim();
+    if (!config.dev.setupSecret || secret !== config.dev.setupSecret) {
+      return res.status(401).json({ error: "Invalid or missing secret" });
+    }
+    const results = { timestamp: new Date().toISOString(), checks: {} };
+
+    // 1. Check env vars
+    results.checks.envVars = {
+      OPENAI_API_KEY: config.defaults.openAiApiKey ? `set (${config.defaults.openAiApiKey.slice(0, 8)}...)` : "NOT SET",
+      SETUP_SECRET: "set",
+      DATABASE_URL: config.storage.databaseUrl ? "set" : "NOT SET",
+    };
+
+    // 2. Check DB + shop settings
+    if (_settingsRepository) {
+      const db = _settingsRepository.store.read();
+      const shops = (db.settings || []).filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:"));
+      results.checks.shops = shops.map(s => ({
+        domain: s.shopDomain,
+        hasToken: Boolean(s.shopifyAccessToken),
+        hasOpenAiKey: Boolean(s.openAiApiKey),
+        openAiKeySource: s.openAiApiKey ? "db" : config.defaults.openAiApiKey ? "env" : "NONE",
+        billingUsage: s.billingUsage || { credits: 0 },
+        billingPlan: s.billingPlan || "free",
+      }));
+    }
+
+    // 3. Actually test OpenAI with a tiny cheap call
+    const openAiKey = config.defaults.openAiApiKey;
+    if (openAiKey) {
+      try {
+        // Test with a minimal dall-e-3 call
+        const testResp = await fetch("https://api.openai.com/v1/images/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
+          body: JSON.stringify({ model: "dall-e-3", prompt: "a red circle", size: "1024x1024", n: 1, response_format: "url" }),
+        });
+        if (testResp.ok) {
+          results.checks.openAiTest = { status: testResp.status, model: "dall-e-3", result: "SUCCESS" };
+        } else {
+          const errBody = await testResp.json().catch(() => ({}));
+          results.checks.openAiTest = { status: testResp.status, model: "dall-e-3", result: "FAILED", error: errBody?.error?.message || "unknown" };
+        }
+      } catch (err) {
+        results.checks.openAiTest = { result: "EXCEPTION", error: err.message };
+      }
+    } else {
+      results.checks.openAiTest = { result: "SKIPPED", reason: "No OPENAI_API_KEY env var" };
+    }
+
+    // 4. Check billing for all shops
+    results.checks.billingNote = "If credits >= limit, generation will be blocked with 403";
+
+    return res.json(results);
+  });
+
   // ── Body parsing (skip /webhooks — they need raw body for HMAC) ────────────
   app.use((req, res, next) => {
     if (req.path.startsWith("/webhooks")) return next();
