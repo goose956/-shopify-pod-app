@@ -402,6 +402,7 @@ class PodPipelineService {
     let usedReferenceImage = false;
 
     if (referenceImageUrl) {
+      log.info({ referenceImageUrl: String(referenceImageUrl).slice(0, 80), imageShape }, "generateDesignImage: attempting image edit with reference");
       openAiImageUrl = await this.generateOpenAiImageEdit({
         prompt: artworkPrompt,
         referenceImageUrl,
@@ -409,6 +410,9 @@ class PodPipelineService {
         imageShape,
       });
       usedReferenceImage = Boolean(openAiImageUrl);
+      if (!usedReferenceImage) {
+        log.warn({ referenceImageUrl: String(referenceImageUrl).slice(0, 80) }, "generateDesignImage: edit with reference FAILED, falling back to text-only");
+      }
     }
 
     if (!openAiImageUrl) {
@@ -493,6 +497,7 @@ class PodPipelineService {
 
   async generateOpenAiImageEdit({ prompt, referenceImageUrl, openAiApiKey, imageShape }) {
     if (!this.isUsableApiKey(openAiApiKey) || !String(referenceImageUrl || "").trim()) {
+      log.warn({ hasKey: this.isUsableApiKey(openAiApiKey), hasRef: Boolean(referenceImageUrl) }, "generateOpenAiImageEdit: skipped (missing key or ref)");
       return null;
     }
 
@@ -536,6 +541,8 @@ class PodPipelineService {
       }
 
       const size = this.getOpenAiSize(imageShape);
+
+      log.info({ blobSize: imageBlob?.size, filename, size, refUrl: String(referenceImageUrl).slice(0, 80) }, "generateOpenAiImageEdit: sending to OpenAI");
 
       const sendEdit = async () => {
         const form = new FormData();

@@ -789,6 +789,18 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(400).json({ error: "No artwork found to create mockup from" });
     }
 
+    // Check if the reference file actually exists on disk
+    if (rawArtworkUrl.startsWith("/uploads/")) {
+      const localPath = path.join(uploadsDir, path.basename(rawArtworkUrl));
+      const fileExists = fs.existsSync(localPath);
+      const fileSize = fileExists ? fs.statSync(localPath).size : 0;
+      log.info({ rawArtworkUrl, localPath, fileExists, fileSizeKB: Math.round(fileSize / 1024) }, "Mockup: reference file check");
+      if (!fileExists) {
+        log.error({ rawArtworkUrl, localPath }, "Mockup: reference artwork file NOT FOUND on disk");
+        return res.status(400).json({ error: "Artwork file no longer exists on server. Please regenerate your design." });
+      }
+    }
+
     try {
       const settings = getEffectiveSettings(session.shopDomain);
       const imageShape = String(req.body?.imageShape || "square").trim().toLowerCase();
@@ -841,6 +853,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       }
 
       // Fallback: AI-generated mockup
+      log.info({ rawArtworkUrl, productType: design.productType, imageShape }, "Mockup: attempting AI-generated mockup with reference image");
       const mockupPrompt = pipelineService.buildMockupPrompt({ productType: design.productType, designConcept: design.prompt });
 
       let mockupResult = await pipelineService.generateDesignImage({
