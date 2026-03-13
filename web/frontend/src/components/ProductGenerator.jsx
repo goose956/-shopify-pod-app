@@ -649,6 +649,23 @@ export function ProductGenerator() {
         </Banner>
       )}
 
+      {/* Processing status banners */}
+      {isGeneratingDesign && (
+        <Banner tone="info" title="Generating your design...">
+          <p>AI is creating your artwork. This usually takes 15–30 seconds — please don't close this page.</p>
+        </Banner>
+      )}
+      {isGeneratingMockup && (
+        <Banner tone="info" title="Generating product mockup...">
+          <p>Placing your design onto the product. This usually takes 15–30 seconds — please don't close this page.</p>
+        </Banner>
+      )}
+      {isFinalizing && (
+        <Banner tone="info" title="Finalizing your product...">
+          <p>Generating lifestyle images, writing listing copy, and publishing to Shopify. This may take up to a minute — please don't close this page.</p>
+        </Banner>
+      )}
+
       {/* Welcome state for first-time merchants */}
       {showWelcome && selectedTab === 0 && (
         <Card>
@@ -793,7 +810,6 @@ export function ProductGenerator() {
                       )}
                     </div>
                     <Select label="Image shape" options={imageShapeOptions} onChange={handleImageShapeChange} value={imageShape} />
-                    <Checkbox label="Publish to Shopify immediately" checked={publishImmediately} onChange={setPublishImmediately} />
                     {inputMode === "describe" && (
                       <Button submit variant="primary" loading={isGeneratingDesign} disabled={!prompt.trim() || isWorking} size="large">
                         Generate Design
@@ -974,7 +990,6 @@ export function ProductGenerator() {
                         )}
                       </div>
                       <Select label="Image shape" options={imageShapeOptions} onChange={handleWinningImageShapeChange} value={winningImageShape} />
-                      <Checkbox label="Publish to Shopify immediately" checked={winningPublishImmediately} onChange={setWinningPublishImmediately} />
                       <InlineStack gap="300">
                         {inputMode === "winning" && (
                           <Button

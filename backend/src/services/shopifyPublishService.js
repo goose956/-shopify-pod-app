@@ -127,16 +127,19 @@ class ShopifyPublishService {
    *  3. Set variant pricing via GraphQL productVariantsBulkUpdate.
    */
   async publish({ shopDomain, title, descriptionHtml, tags, imageUrls, publishImmediately, price, compareAtPrice, productType }) {
-    const accessToken = this._getAccessToken(shopDomain);
-
-    if (!accessToken) {
-      throw new Error(
-        "No Shopify access token for this store. Please complete the OAuth install by visiting your app's install URL."
-      );
-    }
-
     return retryWithBackoff(
       async () => {
+        // Fetch token inside retry loop so a refreshed token is used after 401 clears the stale one
+        const accessToken = this._getAccessToken(shopDomain);
+
+        if (!accessToken) {
+          const err = new Error(
+            "No Shopify access token for this store. Please re-install the app: visit /auth/reinstall?shop=" + shopDomain
+          );
+          err.status = 401;
+          throw err;
+        }
+
         let productId = null;
         let numericId = null;
 

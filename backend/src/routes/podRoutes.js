@@ -107,7 +107,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     return res.json({ authUrl, shop });
   });
 
-  // ── Token health check (safe for production — no secrets exposed) ────────
+  // ── Token health check ────────────────────────────────────────────────────
   router.get("/token-health", async (req, res) => {
     const session = await resolveSession(req);
     if (!session?.shopDomain) {
@@ -116,36 +116,33 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     const shopSettings = settingsRepository.findByShop(session.shopDomain);
     const token = shopSettings?.shopifyAccessToken;
-    const allSettings = settingsRepository.store?.read?.()?.settings || [];
-    const storedShops = allSettings
-      .filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics")
-      .map(s => ({ domain: s.shopDomain, hasToken: Boolean(s.shopifyAccessToken), installedAt: s.installedAt }));
 
     const result = {
       sessionShopDomain: session.shopDomain,
-      sessionSubject: session.subject,
-      authType: session.authType || "unknown",
-      storeType: settingsRepository.store?.constructor?.name || "unknown",
       tokenFound: Boolean(token),
-      tokenPrefix: token ? token.slice(0, 8) + "..." : "none",
-      storedShops,
       shopifyApiCheck: null,
     };
 
-    // Try to validate the token against Shopify
+    // Validate the token against Shopify GraphQL API
     if (token) {
       try {
         const apiVersion = config.shopify.apiVersion;
         const resp = await fetch(
-          `https://${session.shopDomain}/admin/api/${apiVersion}/shop.json`,
-          { headers: { "X-Shopify-Access-Token": token } }
+          `https://${session.shopDomain}/admin/api/${apiVersion}/graphql.json`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": token,
+            },
+            body: JSON.stringify({ query: "{ shop { name } }" }),
+          }
         );
         if (resp.ok) {
           const data = await resp.json();
-          result.shopifyApiCheck = { status: resp.status, shopName: data?.shop?.name, valid: true };
+          result.shopifyApiCheck = { valid: true, shopName: data?.data?.shop?.name };
         } else {
-          const body = await resp.text().catch(() => "");
-          result.shopifyApiCheck = { status: resp.status, valid: false, error: body.slice(0, 200) };
+          result.shopifyApiCheck = { valid: false, status: resp.status };
         }
       } catch (err) {
         result.shopifyApiCheck = { valid: false, error: err.message };
@@ -258,10 +255,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     });
   });
 
-  // ── Manual token set (requires SETUP_SECRET) ──────────────────────────────
+  // ── Manual token set (requires SETUP_SECRET, dev/test only) ────────────────
   router.post("/set-shopify-token", async (req, res) => {
-    // SECURITY: This endpoint requires SETUP_SECRET authentication.
-    // Only the setup-admin identity (authenticated via SETUP_SECRET) may set tokens.
+    if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ error: "Not available in production" });
+    }
     const session = await resolveSession(req);
     if (!session?.shopDomain) {
       return res.status(401).json({ error: "No session" });

@@ -75,7 +75,8 @@ class AuthService {
         shopDomain,
         subject: payload.sub || "",
       };
-    } catch {
+    } catch (err) {
+      log.debug({ err: err.message }, "Session token decode failed");
       return null;
     }
   }

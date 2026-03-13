@@ -116,58 +116,77 @@ async function createServer() {
 
   // ── Admin: diagnose image generation (no Shopify session needed) ───────
   app.get("/admin/diagnose", async (req, res) => {
+    // PRODUCTION GUARD: disabled in production to prevent info leakage
+    if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ error: "Not available" });
+    }
     const secret = String(req.query.secret || "").trim();
     if (!config.dev.setupSecret || secret !== config.dev.setupSecret) {
       return res.status(401).json({ error: "Invalid or missing secret" });
     }
     const results = { timestamp: new Date().toISOString(), checks: {} };
 
-    // 1. Check env vars
+    // 1. Check env vars (presence only, no values)
     results.checks.envVars = {
-      OPENAI_API_KEY: config.defaults.openAiApiKey ? `set (${config.defaults.openAiApiKey.slice(0, 8)}...)` : "NOT SET",
-      SETUP_SECRET: "set",
+      OPENAI_API_KEY: config.defaults.openAiApiKey ? "set" : "NOT SET",
       DATABASE_URL: config.storage.databaseUrl ? "set" : "NOT SET",
     };
 
-    // 2. Check DB + shop settings
+    // 2. Check DB + shop settings (no tokens or key values exposed)
     if (_settingsRepository) {
       const db = _settingsRepository.store.read();
-      const shops = (db.settings || []).filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:"));
+      const shops = (db.settings || []).filter(s => s.shopDomain && !s.shopDomain.startsWith("_nonce:") && s.shopDomain !== "_analytics");
       results.checks.shops = shops.map(s => ({
         domain: s.shopDomain,
         hasToken: Boolean(s.shopifyAccessToken),
-        hasOpenAiKey: Boolean(s.openAiApiKey),
-        openAiKeySource: s.openAiApiKey ? "db" : config.defaults.openAiApiKey ? "env" : "NONE",
         billingUsage: s.billingUsage || { credits: 0 },
         billingPlan: s.billingPlan || "free",
       }));
+
+      // 3. Test Shopify token for each shop (GraphQL — no REST)
+      for (const shopInfo of results.checks.shops) {
+        if (shopInfo.hasToken) {
+          try {
+            const shopSettings = _settingsRepository.findByShop(shopInfo.domain);
+            const token = shopSettings?.shopifyAccessToken;
+            const testResp = await fetch(
+              `https://${shopInfo.domain}/admin/api/${config.shopify.apiVersion}/graphql.json`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+                body: JSON.stringify({ query: "{ shop { name } }" }),
+              }
+            );
+            if (testResp.ok) {
+              const data = await testResp.json();
+              shopInfo.shopifyTokenTest = { result: "VALID", shopName: data?.data?.shop?.name || "unknown" };
+            } else {
+              shopInfo.shopifyTokenTest = { result: "INVALID", status: testResp.status };
+            }
+          } catch (err) {
+            shopInfo.shopifyTokenTest = { result: "ERROR", error: err.message };
+          }
+        }
+      }
     }
 
-    // 3. Actually test OpenAI with a tiny cheap call
+    // 4. Test OpenAI connectivity with a free models list call (no image generation = no cost)
     const openAiKey = config.defaults.openAiApiKey;
     if (openAiKey) {
       try {
-        // Test with a minimal dall-e-3 call
-        const testResp = await fetch("https://api.openai.com/v1/images/generations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${openAiKey}` },
-          body: JSON.stringify({ model: "dall-e-3", prompt: "a red circle", size: "1024x1024", n: 1, response_format: "url" }),
+        const testResp = await fetch("https://api.openai.com/v1/models", {
+          headers: { Authorization: `Bearer ${openAiKey}` },
         });
-        if (testResp.ok) {
-          results.checks.openAiTest = { status: testResp.status, model: "dall-e-3", result: "SUCCESS" };
-        } else {
-          const errBody = await testResp.json().catch(() => ({}));
-          results.checks.openAiTest = { status: testResp.status, model: "dall-e-3", result: "FAILED", error: errBody?.error?.message || "unknown" };
-        }
+        results.checks.openAiTest = {
+          result: testResp.ok ? "CONNECTED" : "FAILED",
+          status: testResp.status,
+        };
       } catch (err) {
         results.checks.openAiTest = { result: "EXCEPTION", error: err.message };
       }
     } else {
-      results.checks.openAiTest = { result: "SKIPPED", reason: "No OPENAI_API_KEY env var" };
+      results.checks.openAiTest = { result: "SKIPPED", reason: "No API key configured" };
     }
-
-    // 4. Check billing for all shops
-    results.checks.billingNote = "If credits >= limit, generation will be blocked with 403";
 
     return res.json(results);
   });
@@ -247,8 +266,11 @@ async function createServer() {
       store = new PostgresStore(config.storage.databaseUrl);
       await store.waitForReady();
       storeType = "PostgresStore";
+    } else if (process.env.NODE_ENV === "production") {
+      log.fatal("DATABASE_URL is required in production — refusing to start with ephemeral storage");
+      process.exit(1);
     } else {
-      log.warn({ path: config.storage.dataFilePath }, "DATABASE_URL not set — using ephemeral JSON file. Data WILL BE LOST on every deploy!");
+      log.warn({ path: config.storage.dataFilePath }, "DATABASE_URL not set — using ephemeral JSON file (dev only)");
       store = new JsonStore(config.storage.dataFilePath);
       storeType = "JsonStore";
     }

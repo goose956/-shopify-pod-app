@@ -35,6 +35,10 @@ export async function getSessionToken() {
     return storedToken;
   }
 
-  // Dev fallback — only works when ALLOW_DEV_BYPASS=true on backend
-  return "dev-session-token";
+  // No token available — app must be opened from within Shopify admin
+  console.warn("sessionToken: no App Bridge or setup secret available");
+  if (import.meta.env.DEV) {
+    return "dev-session-token";
+  }
+  return null;
 }

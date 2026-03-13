@@ -343,7 +343,12 @@ class BillingService {
 
   _getAccessToken(shopDomain) {
     const settings = this.settingsRepository.findByShop(shopDomain) || {};
-    return settings.shopifyAccessToken || this.config.shopify.adminAccessToken || "";
+    if (settings.shopifyAccessToken) return settings.shopifyAccessToken;
+    // Dev/test fallback only — never use a global token in production
+    if (process.env.NODE_ENV !== "production" && this.config.shopify.adminAccessToken) {
+      return this.config.shopify.adminAccessToken;
+    }
+    return "";
   }
 
   _getCurrentUsage(settings) {
