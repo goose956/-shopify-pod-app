@@ -452,8 +452,8 @@ class PodPipelineService {
       return null;
     }
 
-    const size = this.getDallE3Size(imageShape);
-    log.info({ size, promptLen: prompt.length }, "Calling OpenAI dall-e-3 image generation");
+    const size = this.getOpenAiSize(imageShape);
+    log.info({ size, promptLen: prompt.length }, "Calling OpenAI gpt-image-1 image generation");
 
     try {
       const response = await fetch("https://api.openai.com/v1/images/generations", {
@@ -462,16 +462,16 @@ class PodPipelineService {
           "Content-Type": "application/json",
           Authorization: `Bearer ${openAiApiKey}`,
         },
-        body: JSON.stringify({ model: "dall-e-3", prompt, size, response_format: "url", n: 1 }),
+        body: JSON.stringify({ model: "gpt-image-1", prompt, size, n: 1 }),
       });
 
       if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        log.error({ status: response.status, detail: errBody?.error?.message }, "dall-e-3 generation failed");
+        log.error({ status: response.status, detail: errBody?.error?.message }, "gpt-image-1 generation failed");
         return null;
       }
 
-      this._trackCost({ provider: "openai", model: "dall-e-3", operation: "generate" });
+      this._trackCost({ provider: "openai", model: "gpt-image-1", operation: "generate" });
 
       const payload = await response.json();
       const url = payload?.data?.[0]?.url;
