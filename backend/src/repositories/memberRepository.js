@@ -5,9 +5,11 @@ class MemberRepository {
     this.store = store;
   }
 
-  list() {
+  list(shopDomain) {
     const db = this.store.read();
-    return [...db.members].sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    let members = [...db.members];
+    if (shopDomain) members = members.filter((m) => m.shopDomain === shopDomain);
+    return members.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   }
 
   findById(memberId) {
@@ -15,17 +17,21 @@ class MemberRepository {
     return db.members.find((item) => item.id === memberId) || null;
   }
 
-  findByEmail(email) {
+  findByEmail(email, shopDomain) {
     const target = String(email || "").trim().toLowerCase();
     if (!target) {
       return null;
     }
 
     const db = this.store.read();
-    return db.members.find((item) => String(item.email || "").toLowerCase() === target) || null;
+    return db.members.find((item) => {
+      if (String(item.email || "").toLowerCase() !== target) return false;
+      if (shopDomain && item.shopDomain && item.shopDomain !== shopDomain) return false;
+      return true;
+    }) || null;
   }
 
-  create({ email, fullName, passwordHash, passwordSalt }) {
+  create({ email, fullName, passwordHash, passwordSalt, shopDomain }) {
     const db = this.store.read();
     const now = Date.now();
 
@@ -35,6 +41,7 @@ class MemberRepository {
       fullName: String(fullName || "").trim(),
       passwordHash,
       passwordSalt,
+      shopDomain: shopDomain || null,
       authToken: "",
       createdAt: now,
       updatedAt: now,

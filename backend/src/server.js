@@ -469,6 +469,22 @@ async function createServer() {
   // ── Scheduled cleanup of old uploaded files ───────────────────────────────
   startUploadsCleaner(uploadsDir);
 
+  // ── Scheduled cleanup of old DB images (every 6 hours, delete >30 days) ──
+  if (store?.deleteOldImages) {
+    const IMAGE_CLEANUP_INTERVAL = 6 * 60 * 60 * 1000;
+    const IMAGE_MAX_AGE_DAYS = Number(process.env.IMAGE_MAX_AGE_DAYS) || 30;
+    const sweepImages = async () => {
+      try {
+        const deleted = await store.deleteOldImages(IMAGE_MAX_AGE_DAYS);
+        if (deleted > 0) log.info({ deleted, maxAgeDays: IMAGE_MAX_AGE_DAYS }, "DB image cleanup completed");
+      } catch (err) {
+        log.error({ err: err?.message }, "DB image cleanup error");
+      }
+    };
+    setTimeout(sweepImages, 60 * 1000);
+    setInterval(sweepImages, IMAGE_CLEANUP_INTERVAL);
+  }
+
   // ── Global error handler ──────────────────────────────────────────────────
   app.use((err, _req, res, _next) => {
     log.error({ err }, "Unhandled error");

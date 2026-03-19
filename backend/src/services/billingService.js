@@ -291,12 +291,13 @@ class BillingService {
     const subscriptionId = settings.billingSubscriptionId;
 
     if (!subscriptionId) {
-      // Just reset to free
+      // Just reset to free with fresh credits
       this.settingsRepository.upsertByShop(shopDomain, {
         billingPlan: "free",
         billingSubscriptionId: null,
         billingSubscriptionStatus: null,
         billingPendingPlan: null,
+        billingUsage: { credits: 0, periodStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString() },
       });
       return { ok: true, plan: "free" };
     }
@@ -334,6 +335,7 @@ class BillingService {
       billingSubscriptionId: null,
       billingSubscriptionStatus: "CANCELLED",
       billingPendingPlan: null,
+      billingUsage: { credits: 0, periodStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString() },
     });
 
     return { ok: true, plan: "free", previousSubscriptionId: subscriptionId };

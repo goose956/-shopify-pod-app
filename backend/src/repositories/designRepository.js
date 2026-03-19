@@ -10,23 +10,23 @@ class DesignRepository {
     return design;
   }
 
-  update(designId, updater) {
+  update(designId, updater, shopDomain) {
     const db = this.store.read();
     const index = db.designs.findIndex((item) => item.id === designId);
-    if (index === -1) {
-      return null;
-    }
-
+    if (index === -1) return null;
     const current = db.designs[index];
+    if (shopDomain && current.shopDomain !== shopDomain) return null;
     const next = typeof updater === "function" ? updater(current) : { ...current, ...updater };
     db.designs[index] = next;
     this.store.write(db);
     return next;
   }
 
-  findById(designId) {
+  findById(designId, shopDomain) {
     const db = this.store.read();
-    return db.designs.find((item) => item.id === designId) || null;
+    const design = db.designs.find((item) => item.id === designId) || null;
+    if (design && shopDomain && design.shopDomain !== shopDomain) return null;
+    return design;
   }
 
   listByShop(shopDomain) {
@@ -45,10 +45,11 @@ class DesignRepository {
     return counts;
   }
 
-  delete(designId) {
+  delete(designId, shopDomain) {
     const db = this.store.read();
     const index = db.designs.findIndex((item) => item.id === designId);
     if (index === -1) return false;
+    if (shopDomain && db.designs[index].shopDomain !== shopDomain) return false;
     db.designs.splice(index, 1);
     this.store.write(db);
     return true;

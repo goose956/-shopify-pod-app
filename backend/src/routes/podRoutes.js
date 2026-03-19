@@ -408,9 +408,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const published = allDesigns.filter((item) => item.status === "published").length;
     const designCountsByMember = designRepository.countByMember(shopSession.shopDomain);
 
-    // Scope members to only those who have created designs in this shop
-    const shopMemberIds = new Set(Object.keys(designCountsByMember));
-    const allMembers = memberRepository.list().filter((m) => shopMemberIds.has(m.id));
+    // Scope members to only those who belong to this shop
+    const allMembers = memberRepository.list(shopSession.shopDomain);
 
     return res.json({
       visitors: analyticsService.getSummary(),
@@ -811,8 +810,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(400).json({ error: "designId is required" });
     }
 
-    const design = designRepository.findById(designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 
@@ -865,7 +864,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             previewImageUrl: customMockupUrl,
             mockupImageUrl: customMockupUrl,
             updatedAt: Date.now(),
-          });
+          }, session.shopDomain);
 
           if (billingService) billingService.recordUsage(session.shopDomain);
 
@@ -909,7 +908,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             previewImageUrl: designImageUrl,
             mockupImageUrl: designImageUrl,
             updatedAt: Date.now(),
-          });
+          }, session.shopDomain);
 
           // Record credit usage for Printful mockup
           if (billingService) billingService.recordUsage(session.shopDomain);
@@ -958,7 +957,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         previewImageUrl: designImageUrl,
         mockupImageUrl: designImageUrl,
         updatedAt: Date.now(),
-      });
+      }, session.shopDomain);
 
       // Record credit usage for mockup generation
       if (billingService) billingService.recordUsage(session.shopDomain);
@@ -1004,8 +1003,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(400).json({ error: "designId and amendment are required" });
     }
 
-    const design = designRepository.findById(designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 
@@ -1077,7 +1076,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         revisionCount: Number(design.revisionCount || 0) + 1,
         status: "preview_ready",
         updatedAt: Date.now(),
-      });
+      }, session.shopDomain);
 
       // Record credit usage for revision
       if (billingService) billingService.recordUsage(session.shopDomain);
@@ -1110,8 +1109,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(400).json({ error: "designId and imageData are required" });
     }
 
-    const design = designRepository.findById(designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 
@@ -1160,7 +1159,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         mockupImageUrl: null, // Clear mockup since artwork changed
         status: "preview_ready",
         updatedAt: Date.now(),
-      });
+      }, session.shopDomain);
 
       return res.json({
         designId,
@@ -1205,8 +1204,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return res.status(400).json({ error: "designId is required" });
     }
 
-    const design = designRepository.findById(designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 
@@ -1386,7 +1385,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             adminUrl: publishedProduct.adminUrl,
             updatedAt: Date.now(),
             finalizedAt: Date.now(),
-          });
+          }, session.shopDomain);
 
           productRepository.upsertByDesign(designId, {
             designId,
@@ -1395,7 +1394,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             adminUrl: publishedProduct.adminUrl,
             publishImmediately,
             updatedAt: Date.now(),
-          });
+          }, session.shopDomain);
 
           // Publishing is free — credits are only used for AI generation
         } else {
@@ -1403,7 +1402,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             status: "finalized",
             updatedAt: Date.now(),
             finalizedAt: Date.now(),
-          });
+          }, session.shopDomain);
         }
       } catch (statusErr) {
         log.warn({ err: statusErr?.message }, "Finalize step 6 status update error (non-fatal)");
@@ -1456,8 +1455,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const designId = String(req.body?.designId || "").trim();
     if (!designId) return res.status(400).json({ error: "designId is required" });
 
-    const design = designRepository.findById(designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 
@@ -1521,7 +1520,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         shopifyProductId: publishedProduct.productId,
         adminUrl: publishedProduct.adminUrl,
         updatedAt: Date.now(),
-      });
+      }, session.shopDomain);
 
       productRepository.upsertByDesign(designId, {
         designId,
@@ -1530,7 +1529,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         adminUrl: publishedProduct.adminUrl,
         publishImmediately,
         updatedAt: Date.now(),
-      });
+      }, session.shopDomain);
 
       return res.json({
         productId: publishedProduct.productId,
@@ -1581,14 +1580,14 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const session = await requireSession(req, res);
     if (!session) return;
 
-    const design = designRepository.findById(req.params.designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(req.params.designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 
     // Remove associated assets
-    assetStorageService.assetRepository.deleteByDesign(design.id);
-    designRepository.delete(design.id);
+    assetStorageService.assetRepository.deleteByDesign(design.id, session.shopDomain);
+    designRepository.delete(design.id, session.shopDomain);
 
     return res.json({ success: true });
   });
@@ -1599,8 +1598,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       return;
     }
 
-    const design = designRepository.findById(req.params.designId);
-    if (!design || design.shopDomain !== session.shopDomain) {
+    const design = designRepository.findById(req.params.designId, session.shopDomain);
+    if (!design) {
       return res.status(404).json({ error: "Design not found" });
     }
 

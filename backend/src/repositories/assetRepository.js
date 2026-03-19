@@ -10,19 +10,27 @@ class AssetRepository {
     return asset;
   }
 
-  listByDesign(designId) {
+  listByDesign(designId, shopDomain) {
     const db = this.store.read();
-    return db.assets.filter((item) => item.designId === designId);
+    const assets = db.assets.filter((item) => item.designId === designId);
+    if (shopDomain) return assets.filter((a) => a.shopDomain === shopDomain);
+    return assets;
   }
 
-  findById(assetId) {
+  findById(assetId, shopDomain) {
     const db = this.store.read();
-    return db.assets.find((item) => item.id === assetId) || null;
+    const asset = db.assets.find((item) => item.id === assetId) || null;
+    if (asset && shopDomain && asset.shopDomain !== shopDomain) return null;
+    return asset;
   }
 
-  deleteByDesign(designId) {
+  deleteByDesign(designId, shopDomain) {
     const db = this.store.read();
-    db.assets = db.assets.filter((item) => item.designId !== designId);
+    if (shopDomain) {
+      db.assets = db.assets.filter((item) => !(item.designId === designId && item.shopDomain === shopDomain));
+    } else {
+      db.assets = db.assets.filter((item) => item.designId !== designId);
+    }
     this.store.write(db);
   }
 }

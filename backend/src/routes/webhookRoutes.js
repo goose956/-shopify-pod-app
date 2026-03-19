@@ -126,7 +126,7 @@ function createWebhookRouter(deps) {
    */
   async function _purgeShopData(shopDomain, deps) {
     if (!shopDomain) return;
-    const { designRepository, assetRepository, productRepository, settingsRepository } = deps;
+    const { designRepository, assetRepository, productRepository, settingsRepository, memberRepository } = deps;
     const uploadsDir = deps.uploadsDir;
 
     // Delete all designs + their assets + products + uploaded files
@@ -166,6 +166,19 @@ function createWebhookRouter(deps) {
         designRepository.delete(design.id);
       }
       log.info({ shopDomain, count: designs.length }, "Purged designs, assets, products, and files");
+    }
+
+    // Delete members associated with this shop
+    if (memberRepository) {
+      try {
+        const shopMembers = memberRepository.list(shopDomain);
+        for (const member of shopMembers) {
+          memberRepository.update(member.id, { authToken: "", email: "deleted", fullName: "deleted", passwordHash: "", passwordSalt: "" });
+        }
+        log.info({ shopDomain, count: shopMembers.length }, "Purged member data");
+      } catch (err) {
+        log.warn({ shopDomain, err: err?.message }, "Error purging members");
+      }
     }
 
     // Delete shop settings (API keys, access tokens)

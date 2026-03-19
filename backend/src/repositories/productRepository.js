@@ -3,26 +3,33 @@ class ProductRepository {
     this.store = store;
   }
 
-  upsertByDesign(designId, productRecord) {
+  upsertByDesign(designId, productRecord, shopDomain) {
     const db = this.store.read();
     const existingIndex = db.products.findIndex((item) => item.designId === designId);
     if (existingIndex === -1) {
       db.products.push(productRecord);
     } else {
+      if (shopDomain && db.products[existingIndex].shopDomain && db.products[existingIndex].shopDomain !== shopDomain) return null;
       db.products[existingIndex] = productRecord;
     }
     this.store.write(db);
     return productRecord;
   }
 
-  findByDesign(designId) {
+  findByDesign(designId, shopDomain) {
     const db = this.store.read();
-    return db.products.find((item) => item.designId === designId) || null;
+    const product = db.products.find((item) => item.designId === designId) || null;
+    if (product && shopDomain && product.shopDomain && product.shopDomain !== shopDomain) return null;
+    return product;
   }
 
-  deleteByDesign(designId) {
+  deleteByDesign(designId, shopDomain) {
     const db = this.store.read();
-    db.products = db.products.filter((item) => item.designId !== designId);
+    if (shopDomain) {
+      db.products = db.products.filter((item) => !(item.designId === designId && item.shopDomain === shopDomain));
+    } else {
+      db.products = db.products.filter((item) => item.designId !== designId);
+    }
     this.store.write(db);
   }
 }

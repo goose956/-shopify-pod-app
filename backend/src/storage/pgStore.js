@@ -203,6 +203,17 @@ class PostgresStore {
     }));
   }
 
+  /**
+   * Delete images older than `days` days. Returns count deleted.
+   */
+  async deleteOldImages(days = 30) {
+    const result = await this.pool.query(
+      "DELETE FROM images WHERE created_at < NOW() - $1::interval",
+      [`${days} days`]
+    );
+    return result.rowCount;
+  }
+
   /** Graceful shutdown. */
   async close() {
     await this.pool.end();

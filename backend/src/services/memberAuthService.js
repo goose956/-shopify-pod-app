@@ -63,7 +63,7 @@ class MemberAuthService {
     };
   }
 
-  async register({ email, fullName, password }) {
+  async register({ email, fullName, password, shopDomain }) {
     const normalizedEmail = String(email || "").trim().toLowerCase();
     const normalizedName = String(fullName || "").trim();
     const rawPassword = String(password || "");
@@ -76,7 +76,7 @@ class MemberAuthService {
       throw new Error("Password must be at least 8 characters");
     }
 
-    const existing = this.memberRepository.findByEmail(normalizedEmail);
+    const existing = this.memberRepository.findByEmail(normalizedEmail, shopDomain);
     if (existing) {
       throw new Error("Email is already registered");
     }
@@ -89,16 +89,17 @@ class MemberAuthService {
       fullName: normalizedName || normalizedEmail,
       passwordHash,
       passwordSalt,
+      shopDomain: shopDomain || null,
     });
 
     return this.sanitizeMember(member);
   }
 
-  async login({ email, password }) {
+  async login({ email, password, shopDomain }) {
     const normalizedEmail = String(email || "").trim().toLowerCase();
     const rawPassword = String(password || "");
 
-    const member = this.memberRepository.findByEmail(normalizedEmail);
+    const member = this.memberRepository.findByEmail(normalizedEmail, shopDomain);
     if (!member) {
       throw new Error("Invalid email or password");
     }
@@ -144,7 +145,7 @@ class MemberAuthService {
       memberId: member.id,
       email: member.email,
       fullName: member.fullName,
-      shopDomain: `member:${member.id}`,
+      shopDomain: member.shopDomain || `member:${member.id}`,
       authToken: token,
     };
   }
