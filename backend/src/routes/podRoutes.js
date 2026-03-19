@@ -1123,12 +1123,17 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     // ── Billing enforcement ──────────────────────────────────────────
     if (billingService) {
+      const lifestyleCount = Array.isArray(req.body?.lifestylePrompts) && req.body.lifestylePrompts.filter(Boolean).length > 0
+        ? req.body.lifestylePrompts.filter(Boolean).length
+        : 3; // default 3 lifestyle images
       const check = billingService.canPerformAction(session.shopDomain, "finalize");
-      if (!check.allowed) {
+      const creditsNeeded = lifestyleCount;
+      const remaining = check.limit - check.current;
+      if (!check.allowed || remaining < creditsNeeded) {
         return res.status(403).json({
           error: check.isOnTrial
-            ? `Trial credit limit reached (${check.current}/${check.limit}).`
-            : `Monthly credit limit reached (${check.current}/${check.limit}). Upgrade for more.`,
+            ? `Trial credit limit reached (${check.current}/${check.limit}). Need ${creditsNeeded} credits.`
+            : `Not enough credits (${remaining} remaining, need ${creditsNeeded}). Upgrade for more.`,
           limitReached: true, isOnTrial: check.isOnTrial || false, usage: check,
         });
       }
@@ -1348,8 +1353,13 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         providerMessages.push(`Shopify publish skipped: ${publishError}. You can publish later once OAuth is configured.`);
       }
 
-      // Record credit usage for finalize
-      if (billingService) billingService.recordUsage(session.shopDomain);
+      // Record credit usage — 1 credit per lifestyle image generated
+      if (billingService) {
+        const creditCount = lifestyleImages.length || 1;
+        for (let i = 0; i < creditCount; i++) {
+          billingService.recordUsage(session.shopDomain);
+        }
+      }
 
       log.info({ imageCount: lifestyleImages.length, published: !!publishedProduct }, "Finalize complete");
       return res.json({
