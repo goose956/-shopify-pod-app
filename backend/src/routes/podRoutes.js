@@ -696,7 +696,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           const mimeType = match[1];
           const base64Data = match[2];
           const imgId = require("crypto").randomUUID();
-          await store.saveImage({ id: imgId, shopDomain: session.shopDomain, data: Buffer.from(base64Data, "base64"), mimeType });
+          await pipelineService.store.saveImage({ id: imgId, shopDomain: session.shopDomain, data: Buffer.from(base64Data, "base64"), mimeType });
           customProductImageUrl = `/images/${imgId}`;
           log.info({ customProductImageUrl, mimeType }, "Saved custom product image to DB");
         }
