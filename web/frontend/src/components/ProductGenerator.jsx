@@ -152,6 +152,8 @@ export function ProductGenerator() {
   const [selectedPrintfulId, setSelectedPrintfulId] = useState(null);
   const [selectedPrintfulTitle, setSelectedPrintfulTitle] = useState("");
   const [productSourceMode, setProductSourceMode] = useState("dropdown");
+  const [customProductImage, setCustomProductImage] = useState(null);
+  const [customProductPreview, setCustomProductPreview] = useState("");
 
   const handleProductTypeChange = useCallback((value) => {
     setProductType(value);
@@ -159,6 +161,18 @@ export function ProductGenerator() {
     setSelectedPrintfulTitle("");
   }, []);
   const handleImageShapeChange = useCallback((value) => setImageShape(value), []);
+
+  const handleCustomProductImage = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCustomProductImage(reader.result);
+      setCustomProductPreview(reader.result);
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
   // Fetch full Printful catalog once
   useEffect(() => {
@@ -353,7 +367,7 @@ export function ProductGenerator() {
       const response = await fetch("/api/design-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
-        body: JSON.stringify({ prompt, productType, imageShape, publishImmediately }),
+        body: JSON.stringify({ prompt, productType, imageShape, publishImmediately, customProductImage: customProductImage || undefined }),
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -747,12 +761,13 @@ export function ProductGenerator() {
                     />
                     <div>
                       <div style={{ marginBottom: 4 }}><Text variant="bodyMd" as="label" fontWeight="semibold">Product type</Text></div>
-                      {catalogProducts.length > 0 && (
-                        <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 8, overflow: "hidden", border: "1px solid #c9cccf" }}>
-                          <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("dropdown"); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: productSourceMode === "dropdown" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "dropdown" ? "#fff" : "#555", transition: "all 0.15s" }}>Quick Select</button>
+                      <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 8, overflow: "hidden", border: "1px solid #c9cccf" }}>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("dropdown"); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: productSourceMode === "dropdown" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "dropdown" ? "#fff" : "#555", transition: "all 0.15s" }}>Quick Select</button>
+                        {catalogProducts.length > 0 && (
                           <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("printful"); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", borderLeft: "1px solid #c9cccf", cursor: "pointer", background: productSourceMode === "printful" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "printful" ? "#fff" : "#555", transition: "all 0.15s" }}>Printful Catalog ({catalogProducts.length})</button>
-                        </div>
-                      )}
+                        )}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("custom"); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", borderLeft: "1px solid #c9cccf", cursor: "pointer", background: productSourceMode === "custom" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "custom" ? "#fff" : "#555", transition: "all 0.15s" }}>Custom Image</button>
+                      </div>
                       {productSourceMode === "dropdown" && (
                         <Select label="" options={productTypeOptions} onChange={handleProductTypeChange} value={productType} />
                       )}
@@ -806,6 +821,23 @@ export function ProductGenerator() {
                             {filteredCatalog.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 12, color: "#888", fontSize: 12 }}>No products match</div>}
                             {filteredCatalog.length > 60 && <div style={{ gridColumn: "1/-1", textAlign: "center", padding: 6, color: "#888", fontSize: 10 }}>Showing 60 of {filteredCatalog.length} — narrow search</div>}
                           </div>
+                        </div>
+                      )}
+                      {productSourceMode === "custom" && (
+                        <div>
+                          {customProductPreview ? (
+                            <div style={{ position: "relative", marginBottom: 8, textAlign: "center" }}>
+                              <img src={customProductPreview} alt="Custom product" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8, border: "1px solid #e3e5e7" }} />
+                              <button type="button" onClick={(e) => { e.stopPropagation(); setCustomProductImage(null); setCustomProductPreview(""); }} style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 14, lineHeight: "24px" }}>&times;</button>
+                            </div>
+                          ) : (
+                            <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 12px", border: "2px dashed #c9cccf", borderRadius: 8, cursor: "pointer", background: "#fafafa", marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
+                              <span style={{ fontSize: 28, marginBottom: 4 }}>📷</span>
+                              <span style={{ fontSize: 13, fontWeight: 500, color: "#555" }}>Click to upload product image</span>
+                              <span style={{ fontSize: 11, color: "#888", marginTop: 2 }}>JPG, PNG, or WebP</span>
+                              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleCustomProductImage} style={{ display: "none" }} />
+                            </label>
+                          )}
                         </div>
                       )}
                     </div>
@@ -927,12 +959,13 @@ export function ProductGenerator() {
                       />
                       <div>
                         <div style={{ marginBottom: 4 }}><Text variant="bodyMd" as="label" fontWeight="semibold">Product type</Text></div>
-                        {catalogProducts.length > 0 && (
-                          <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 8, overflow: "hidden", border: "1px solid #c9cccf" }}>
-                            <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("dropdown"); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: productSourceMode === "dropdown" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "dropdown" ? "#fff" : "#555", transition: "all 0.15s" }}>Quick Select</button>
+                        <div style={{ display: "flex", gap: 0, marginBottom: 8, borderRadius: 8, overflow: "hidden", border: "1px solid #c9cccf" }}>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("dropdown"); setSelectedPrintfulId(null); setSelectedPrintfulTitle(""); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", background: productSourceMode === "dropdown" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "dropdown" ? "#fff" : "#555", transition: "all 0.15s" }}>Quick Select</button>
+                          {catalogProducts.length > 0 && (
                             <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("printful"); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", borderLeft: "1px solid #c9cccf", cursor: "pointer", background: productSourceMode === "printful" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "printful" ? "#fff" : "#555", transition: "all 0.15s" }}>Printful Catalog ({catalogProducts.length})</button>
-                          </div>
-                        )}
+                          )}
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setProductSourceMode("custom"); }} style={{ flex: 1, padding: "7px 0", fontSize: 13, fontWeight: 600, border: "none", borderLeft: "1px solid #c9cccf", cursor: "pointer", background: productSourceMode === "custom" ? "#005bd3" : "#f6f6f7", color: productSourceMode === "custom" ? "#fff" : "#555", transition: "all 0.15s" }}>Custom Image</button>
+                        </div>
                         {productSourceMode === "dropdown" && (
                           <Select label="" options={productTypeOptions} onChange={handleWinningProductTypeChange} value={winningProductType} />
                         )}
@@ -988,6 +1021,23 @@ export function ProductGenerator() {
                             </div>
                           </div>
                         )}
+                        {productSourceMode === "custom" && (
+                          <div>
+                            {customProductPreview ? (
+                              <div style={{ position: "relative", marginBottom: 8, textAlign: "center" }}>
+                                <img src={customProductPreview} alt="Custom product" style={{ maxWidth: "100%", maxHeight: 180, borderRadius: 8, border: "1px solid #e3e5e7" }} />
+                                <button type="button" onClick={(e) => { e.stopPropagation(); setCustomProductImage(null); setCustomProductPreview(""); }} style={{ position: "absolute", top: 4, right: 4, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 24, height: 24, cursor: "pointer", fontSize: 14, lineHeight: "24px" }}>&times;</button>
+                              </div>
+                            ) : (
+                              <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 12px", border: "2px dashed #c9cccf", borderRadius: 8, cursor: "pointer", background: "#fafafa", marginBottom: 8 }} onClick={(e) => e.stopPropagation()}>
+                                <span style={{ fontSize: 28, marginBottom: 4 }}>📷</span>
+                                <span style={{ fontSize: 13, fontWeight: 500, color: "#555" }}>Click to upload product image</span>
+                                <span style={{ fontSize: 11, color: "#888", marginTop: 2 }}>JPG, PNG, or WebP</span>
+                                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleCustomProductImage} style={{ display: "none" }} />
+                              </label>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <Select label="Image shape" options={imageShapeOptions} onChange={handleWinningImageShapeChange} value={winningImageShape} />
                       <InlineStack gap="300">
@@ -1020,7 +1070,7 @@ export function ProductGenerator() {
                                 const response = await fetch("/api/design-preview", {
                                   method: "POST",
                                   headers: { "Content-Type": "application/json", "X-Shopify-Session-Token": sessionToken },
-                                  body: JSON.stringify({ prompt: winningPrompt, productType: winningProductType, imageShape: winningImageShape, publishImmediately: winningPublishImmediately }),
+                                  body: JSON.stringify({ prompt: winningPrompt, productType: winningProductType, imageShape: winningImageShape, publishImmediately: winningPublishImmediately, customProductImage: customProductImage || undefined }),
                                 });
                                 if (!response.ok) {
                                   const data = await response.json().catch(() => ({}));

@@ -679,6 +679,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
     const productType = sanitize(req.body?.productType || "mug", 50).toLowerCase();
     const imageShape = sanitize(req.body?.imageShape || "square", 20).toLowerCase();
     const publishImmediately = Boolean(req.body?.publishImmediately);
+    const customProductImage = req.body?.customProductImage || null; // base64 data URL
 
     if (!prompt) {
       return res.status(400).json({ error: "Prompt is required" });
@@ -686,6 +687,20 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
     try {
       const settings = getEffectiveSettings(session.shopDomain);
+
+      // If user uploaded a custom product image, save it to DB
+      let customProductImageUrl = null;
+      if (customProductImage && typeof customProductImage === "string" && customProductImage.startsWith("data:image/")) {
+        const match = customProductImage.match(/^data:(image\/\w+);base64,(.+)$/);
+        if (match) {
+          const mimeType = match[1];
+          const base64Data = match[2];
+          const imgId = require("crypto").randomUUID();
+          await store.saveImage({ id: imgId, shopDomain: session.shopDomain, data: Buffer.from(base64Data, "base64"), mimeType });
+          customProductImageUrl = `/images/${imgId}`;
+          log.info({ customProductImageUrl, mimeType }, "Saved custom product image to DB");
+        }
+      }
 
       // Generate ONLY the raw isolated artwork (mockup comes later when user approves)
       const artworkPrompt = await pipelineService.buildArtworkPrompt({ prompt, productType });
@@ -711,6 +726,9 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         createdBy: session.subject || session.memberId || null,
       });
       design.rawArtworkUrl = rawArtworkUrl;
+      if (customProductImageUrl) {
+        design.customProductImageUrl = customProductImageUrl;
+      }
 
       const previewAsset = assetStorageService.saveAsset({
         designId: design.id,
@@ -819,6 +837,49 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       const settings = getEffectiveSettings(session.shopDomain);
       const imageShape = String(req.body?.imageShape || "square").trim().toLowerCase();
       const printfulProductId = req.body?.printfulProductId || null;
+
+      // If user uploaded a custom product image, use dual-image mockup generation
+      if (design.customProductImageUrl) {
+        log.info({ customProductImageUrl: design.customProductImageUrl, rawArtworkUrl }, "Mockup: using custom product image");
+        const mockupPrompt = `Place the artwork design from the first image onto the product shown in the second image. Create a realistic, professional product mockup. The design should appear naturally on the product surface, with proper perspective and lighting that matches the product photo.`;
+        const customMockupUrl = await pipelineService.generateMockupWithCustomProduct({
+          artworkUrl: rawArtworkUrl,
+          customProductImageUrl: design.customProductImageUrl,
+          prompt: mockupPrompt,
+          openAiApiKey: settings?.openAiApiKey || "",
+          imageShape,
+          shopDomain: session.shopDomain,
+        });
+
+        if (customMockupUrl) {
+          assetStorageService.saveAsset({
+            designId,
+            shopDomain: session.shopDomain,
+            type: "design-preview",
+            role: "mockup",
+            url: customMockupUrl,
+            promptSnapshot: mockupPrompt,
+          });
+
+          designRepository.update(designId, {
+            previewImageUrl: customMockupUrl,
+            mockupImageUrl: customMockupUrl,
+            updatedAt: Date.now(),
+          });
+
+          if (billingService) billingService.recordUsage(session.shopDomain);
+
+          return res.json({
+            designId,
+            designImageUrl: customMockupUrl,
+            provider: {
+              designImage: "openai",
+              message: "Custom product mockup generated with OpenAI.",
+            },
+          });
+        }
+        log.warn({}, "Custom product mockup failed, falling back to standard flow");
+      }
 
       // Try Printful first (free, professional mockups)
       if (printfulMockupService && settings?.printfulApiKey) {

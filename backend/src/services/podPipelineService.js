@@ -669,6 +669,93 @@ class PodPipelineService {
     }
   }
 
+  /**
+   * Generate a mockup by sending both the artwork AND the custom product photo to OpenAI image edit.
+   * Uses the multi-image capability of gpt-image-1 edits endpoint.
+   */
+  async generateMockupWithCustomProduct({ artworkUrl, customProductImageUrl, prompt, openAiApiKey, imageShape, shopDomain }) {
+    if (!this.isUsableApiKey(openAiApiKey)) return null;
+
+    try {
+      const resolveBlob = async (url) => {
+        if (String(url).startsWith("data:")) {
+          const match = url.match(/^data:(image\/\w+);base64,(.+)$/);
+          if (!match) return null;
+          return new Blob([Buffer.from(match[2], "base64")], { type: match[1] });
+        }
+        if (String(url).startsWith("/images/") && this.store?.getImage) {
+          const rec = await this.store.getImage(url.replace("/images/", ""));
+          if (rec) return new Blob([rec.data], { type: rec.mimeType });
+          return null;
+        }
+        if (String(url).startsWith("/uploads/")) {
+          const localPath = path.join(this.uploadsDir, path.basename(url));
+          if (fs.existsSync(localPath)) {
+            const buffer = fs.readFileSync(localPath);
+            const ext = path.extname(localPath).toLowerCase();
+            const mimeType = ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
+            return new Blob([buffer], { type: mimeType });
+          }
+          return null;
+        }
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        return resp.blob();
+      };
+
+      const [artworkBlob, productBlob] = await Promise.all([
+        resolveBlob(artworkUrl),
+        resolveBlob(customProductImageUrl),
+      ]);
+
+      if (!artworkBlob || !productBlob) {
+        log.warn({ hasArtwork: Boolean(artworkBlob), hasProduct: Boolean(productBlob) }, "generateMockupWithCustomProduct: missing image blob");
+        return null;
+      }
+
+      const size = this.getOpenAiSize(imageShape);
+      const form = new FormData();
+      form.append("model", "gpt-image-1");
+      form.append("prompt", prompt);
+      form.append("size", size);
+      form.append("image[]", artworkBlob, "artwork.png");
+      form.append("image[]", productBlob, "product.png");
+
+      log.info({ artworkSize: artworkBlob.size, productSize: productBlob.size, size }, "generateMockupWithCustomProduct: calling OpenAI edits with 2 images");
+
+      const response = await fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${openAiApiKey}` },
+        body: form,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        log.error({ status: response.status, detail: errBody?.error?.message }, "generateMockupWithCustomProduct: gpt-image-1 edit failed");
+        return null;
+      }
+
+      this._trackCost({ provider: "openai", model: "gpt-image-1", operation: "edit" });
+
+      const payload = await response.json();
+      const url = payload?.data?.[0]?.url;
+      if (url) {
+        const savedUrl = await downloadAndSaveImage(this.store, shopDomain, url);
+        return savedUrl || url;
+      }
+      const b64 = payload?.data?.[0]?.b64_json;
+      if (b64) {
+        const savedUrl = await saveBase64Image(this.store, shopDomain, b64, "image/png");
+        if (savedUrl) return savedUrl;
+        return `data:image/png;base64,${b64}`;
+      }
+      return null;
+    } catch (err) {
+      log.error({ err: err?.message }, "generateMockupWithCustomProduct exception");
+      return null;
+    }
+  }
+
   async generateLifestyleImages({ productType, baseDesignImageUrl, designConcept, keiAiApiKey, kieEditUrl, openAiApiKey, stabilityApiKey, lifestylePrompts, maxWaitMs, pollIntervalMs, shopDomain }) {
     const defaultPrompts = [
       `Place this exact ${productType} product on a kitchen table in a bright room with natural daylight. Keep the product design exactly as shown in the reference image.`,
