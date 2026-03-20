@@ -1421,6 +1421,17 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         }
       }
 
+      // If publish failed with 401, include reauth URL so frontend can auto-redirect
+      let needsReauth = false;
+      let authUrl = null;
+      if (publishError && (publishError.includes("401") || publishError.includes("access token"))) {
+        try {
+          const host = config.shopify.hostName.replace(/^https?:\/\//, "");
+          authUrl = `https://${host}/auth/reinstall?shop=${encodeURIComponent(session.shopDomain)}`;
+          needsReauth = true;
+        } catch (_) { /* ignore */ }
+      }
+
       log.info({ imageCount: lifestyleImages.length, published: !!publishedProduct }, "Finalize complete");
       return res.json({
         productId: publishedProduct?.productId || null,
@@ -1428,6 +1439,8 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         lifestyleImages,
         transparentArtworkUrl,
         publishError: publishError || null,
+        needsReauth,
+        authUrl,
         provider: {
           lifestyleImages: lifestyleResult.provider,
           listingCopy: "ok",
@@ -1537,6 +1550,24 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       });
     } catch (pubErr) {
       log.error({ err: pubErr?.message }, "Retry publish failed");
+
+      // If 401 (token revoked/invalid), auto-trigger re-auth
+      if (pubErr?.status === 401 || (pubErr?.message && pubErr.message.includes("401"))) {
+        try {
+          const host = config.shopify.hostName.replace(/^https?:\/\//, "");
+          const authUrl = `https://${host}/auth/reinstall?shop=${encodeURIComponent(session.shopDomain)}`;
+          return res.json({
+            productId: null,
+            adminUrl: null,
+            publishError: "Store connection expired. Reconnecting automatically...",
+            needsReauth: true,
+            authUrl,
+          });
+        } catch (reauthErr) {
+          log.error({ err: reauthErr?.message }, "Auto-reauth URL generation failed");
+        }
+      }
+
       return res.json({
         productId: null,
         adminUrl: null,

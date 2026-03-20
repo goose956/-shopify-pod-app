@@ -316,7 +316,7 @@ async function createServer() {
   // If a ?shop= param is present AND we have a DB with no valid token for that shop,
   // redirect to the OAuth install flow so the token is obtained before the app loads.
   let _settingsRepository = null; // populated after DB init
-  app.get("*", (req, res, next) => {
+  app.get("*", async (req, res, next) => {
     if (req.path.startsWith("/api") || req.path.startsWith("/webhooks") || req.path.startsWith("/auth") || req.path.startsWith("/uploads") || req.path.startsWith("/images/") || req.path.startsWith("/admin") || req.path === "/health" || req.path === "/privacy" || req.path === "/terms") {
       return next();
     }
@@ -324,10 +324,43 @@ async function createServer() {
     // ── Install detection: redirect to OAuth if shop has no token ──────────
     const shopParam = String(req.query.shop || "").trim();
     if (shopParam && /^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$/.test(shopParam) && _settingsRepository) {
+      // If coming from Shopify admin (hmac present), refresh cache from DB
+      // and validate the stored token — it may have been revoked by an uninstall.
+      if (req.query.hmac && typeof store?.refreshCacheFromDb === "function") {
+        try {
+          await store.refreshCacheFromDb();
+        } catch (_) { /* logged inside */ }
+      }
+
       const existing = _settingsRepository.findByShop(shopParam);
       if (!existing?.shopifyAccessToken) {
         log.info({ shop: shopParam }, "Install detection: no token for shop — redirecting to OAuth");
         return res.redirect(`/auth?shop=${encodeURIComponent(shopParam)}`);
+      }
+
+      // If hmac is present (Shopify redirect, e.g. after reinstall), validate token
+      if (req.query.hmac) {
+        try {
+          const testResp = await fetch(
+            `https://${shopParam}/admin/api/${config.shopify.apiVersion}/graphql.json`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": existing.shopifyAccessToken,
+              },
+              body: JSON.stringify({ query: "{ shop { name } }" }),
+            }
+          );
+          if (testResp.status === 401 || testResp.status === 403) {
+            log.warn({ shop: shopParam }, "Install detection: stored token is invalid — forcing re-auth");
+            _settingsRepository.upsertByShop(shopParam, { shopifyAccessToken: "", shopifyScopes: "" });
+            _settingsRepository.flush().catch(() => {});
+            return res.redirect(`/auth?shop=${encodeURIComponent(shopParam)}`);
+          }
+        } catch (valErr) {
+          log.warn({ shop: shopParam, err: valErr.message }, "Install detection: token validation failed (allowing through)");
+        }
       }
     }
 

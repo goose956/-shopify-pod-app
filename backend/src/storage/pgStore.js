@@ -146,6 +146,30 @@ class PostgresStore {
   }
 
   /**
+   * Reload the in-memory cache from PostgreSQL.
+   * Use this when the cache may be stale (e.g. after app reinstall, or when
+   * another instance may have written a new token).
+   */
+  async refreshCacheFromDb() {
+    try {
+      const result = await this.pool.query("SELECT data FROM app_data WHERE id = 1");
+      if (result.rows.length > 0) {
+        const parsed = result.rows[0].data;
+        this._cache = {
+          designs: Array.isArray(parsed.designs) ? parsed.designs : [],
+          assets: Array.isArray(parsed.assets) ? parsed.assets : [],
+          products: Array.isArray(parsed.products) ? parsed.products : [],
+          settings: Array.isArray(parsed.settings) ? parsed.settings : [],
+          members: Array.isArray(parsed.members) ? parsed.members : [],
+        };
+        log.debug({}, "PostgresStore cache refreshed from DB");
+      }
+    } catch (err) {
+      log.error({ err: err.message }, "PostgresStore refreshCacheFromDb failed");
+    }
+  }
+
+  /**
    * Save an image to the images table. Returns the UUID id.
    */
   async saveImage({ id, shopDomain, data, mimeType }) {

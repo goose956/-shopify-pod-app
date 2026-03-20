@@ -129,6 +129,12 @@ class ShopifyPublishService {
   async publish({ shopDomain, title, descriptionHtml, tags, imageUrls, publishImmediately, price, compareAtPrice, productType }) {
     return retryWithBackoff(
       async () => {
+        // Refresh cache from Postgres before token lookup to catch tokens
+        // updated by OAuth callback (especially after reinstall)
+        if (typeof this.settingsRepository?.store?.refreshCacheFromDb === "function") {
+          try { await this.settingsRepository.store.refreshCacheFromDb(); } catch (_) { /* logged inside */ }
+        }
+
         // Fetch token inside retry loop so a refreshed token is used after 401 clears the stale one
         const accessToken = this._getAccessToken(shopDomain);
 

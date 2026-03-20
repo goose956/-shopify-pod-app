@@ -505,6 +505,13 @@ export function ProductGenerator() {
         throw new Error(errorDetail);
       }
       const data = await response.json();
+
+      // If publish failed with 401, auto-redirect to re-auth
+      if (data.needsReauth && data.authUrl) {
+        window.open(data.authUrl, "_top");
+        return;
+      }
+
       setLifestyleImages(data.lifestyleImages || []);
       setListingCopy(data.listingCopy || null);
       setTransparentArtworkUrl(data.transparentArtworkUrl || "");
@@ -1474,7 +1481,7 @@ export function ProductGenerator() {
                       Product images and listing copy were generated successfully, but publishing to Shopify failed: {finalProduct.publishError || "No valid Shopify access token."}
                     </p>
                     <p>
-                      Click "Reconnect Store" to re-authorize, then retry publishing.
+                      Click "Retry Publish" below — the app will automatically reconnect if needed.
                     </p>
                   </Banner>
                 </>
@@ -1488,28 +1495,9 @@ export function ProductGenerator() {
               <BlockStack gap="300">
                 <Text variant="headingSm" as="h3">Retry Publishing</Text>
                 <Text variant="bodySm" tone="subdued" as="p">
-                  If publishing failed, reconnect your store first, then retry.
+                  The app will automatically reconnect your store if needed.
                 </Text>
                 <InlineStack gap="300">
-                  <Button
-                    onClick={async () => {
-                      try {
-                        const sessionToken = await getSessionToken();
-                        const resp = await fetch("/api/reauth", {
-                          headers: { Authorization: `Bearer ${sessionToken}` },
-                        });
-                        const data = await resp.json();
-                        if (data.authUrl) {
-                          // Open the OAuth flow — this will redirect back into the app
-                          window.open(data.authUrl, "_top");
-                        }
-                      } catch (err) {
-                        setError("Could not start re-authorization: " + (err.message || err));
-                      }
-                    }}
-                  >
-                    Reconnect Store
-                  </Button>
                   <Button
                     variant="primary"
                     onClick={async () => {
@@ -1523,13 +1511,18 @@ export function ProductGenerator() {
                           body: JSON.stringify({ designId, publishImmediately }),
                         });
                         const data = await response.json();
+                        // If the server says we need re-auth, redirect automatically
+                        if (data.needsReauth && data.authUrl) {
+                          window.open(data.authUrl, "_top");
+                          return;
+                        }
                         if (!response.ok) {
                           throw new Error(data.error || `Publish failed (${response.status})`);
                         }
                         if (data.productId) {
                           setFinalProduct({ adminUrl: data.adminUrl, productId: data.productId, publishError: null });
                         } else {
-                          setError(data.publishError || "Publish still failed. Try 'Reconnect Store' first.");
+                          setError(data.publishError || "Publish failed. Please try again.");
                         }
                       } catch (err) {
                         setError(err.message || "Retry failed");
