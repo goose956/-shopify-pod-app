@@ -81,7 +81,26 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&state=${nonce}`;
 
-    return res.redirect(authUrl);
+    // If this runs inside the Shopify admin iframe, a plain redirect to
+    // the OAuth consent page will fail ("refused to connect"). Serve a
+    // small HTML page that breaks out of the iframe first.
+    return res.type("html").send(`
+      <!DOCTYPE html>
+      <html>
+        <head><title>Redirecting…</title></head>
+        <body>
+          <p>Redirecting to Shopify for authorization…</p>
+          <script>
+            var url = ${JSON.stringify(authUrl)};
+            if (window.top !== window.self) {
+              window.top.location.replace(url);
+            } else {
+              window.location.replace(url);
+            }
+          </script>
+        </body>
+      </html>
+    `);
   });
 
   // ── GET /auth/callback ─────────────────────────────────────────────────────
@@ -208,11 +227,30 @@ function createAuthRouter({ config, authService, settingsRepository }) {
       const verify = settingsRepository.findByShop(shop);
       log.debug({ shop, tokenFound: Boolean(verify?.shopifyAccessToken) }, "OAuth verify save");
 
-      // Redirect into embedded app
-      const host = Buffer.from(`${shop}/admin`).toString("base64url");
-      return res.redirect(
-        `https://${shop}/admin/apps/${config.shopify.apiKey}`
-      );
+      // Redirect into embedded app — use an intermediate page that sets
+      // window.top.location so the Shopify admin iframe re-embeds correctly.
+      // A plain redirect from the OAuth callback (which runs at top level)
+      // can cause "refused to connect" because the admin page tries to
+      // re-embed the app before the redirect chain fully settles.
+      const appUrl = `https://${shop}/admin/apps/${config.shopify.apiKey}`;
+      return res.type("html").send(`
+        <!DOCTYPE html>
+        <html>
+          <head><title>Redirecting…</title></head>
+          <body>
+            <p>Installing… you will be redirected automatically.</p>
+            <script>
+              if (window.top === window.self) {
+                // We are at top level (OAuth callback) — navigate to admin
+                window.location.replace(${JSON.stringify(appUrl)});
+              } else {
+                // We are inside an iframe — break out to admin
+                window.top.location.replace(${JSON.stringify(appUrl)});
+              }
+            </script>
+          </body>
+        </html>
+      `);
     } catch (err) {
       log.error({ err }, "OAuth callback error");
       return res.status(500).send("OAuth callback failed.");
