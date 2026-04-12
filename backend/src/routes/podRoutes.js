@@ -642,10 +642,11 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       });
 
       // Record credit usage for image analysis
-      if (billingService) billingService.recordUsage(session.shopDomain);
+      if (billingService) billingService.recordUsage(session.shopDomain, "analyze-image");
 
       return res.json({ description: result.description });
     } catch (error) {
+      if (billingService) billingService.recordError(session.shopDomain, "analyze-image", error?.message);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to analyze image",
       });
@@ -745,7 +746,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
 
       // Record credit usage
       if (billingService) {
-        billingService.recordUsage(session.shopDomain);
+        billingService.recordUsage(session.shopDomain, "design-preview");
       }
 
       return res.json({
@@ -758,6 +759,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       });
     } catch (error) {
       log.error({ err: error?.message, stack: error?.stack?.split?.('\n')?.slice(0, 5) }, "design-preview route error");
+      if (billingService) billingService.recordError(session.shopDomain, "design-preview", error?.message);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to generate design preview",
       });
@@ -866,7 +868,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
             updatedAt: Date.now(),
           }, session.shopDomain);
 
-          if (billingService) billingService.recordUsage(session.shopDomain);
+          if (billingService) billingService.recordUsage(session.shopDomain, "mockup-custom");
 
           return res.json({
             designId,
@@ -911,7 +913,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
           }, session.shopDomain);
 
           // Record credit usage for Printful mockup
-          if (billingService) billingService.recordUsage(session.shopDomain);
+          if (billingService) billingService.recordUsage(session.shopDomain, "mockup-printful");
 
           return res.json({
             designId,
@@ -960,7 +962,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       }, session.shopDomain);
 
       // Record credit usage for mockup generation
-      if (billingService) billingService.recordUsage(session.shopDomain);
+      if (billingService) billingService.recordUsage(session.shopDomain, "mockup-ai");
 
       return res.json({
         designId,
@@ -971,6 +973,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         },
       });
     } catch (error) {
+      if (billingService) billingService.recordError(session?.shopDomain, "generate-mockup", error?.message);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to generate product mockup",
       });
@@ -1079,7 +1082,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       }, session.shopDomain);
 
       // Record credit usage for revision
-      if (billingService) billingService.recordUsage(session.shopDomain);
+      if (billingService) billingService.recordUsage(session.shopDomain, "revise-design");
 
       return res.json({
         designId,
@@ -1091,6 +1094,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
         },
       });
     } catch (error) {
+      if (billingService) billingService.recordError(session?.shopDomain, "revise-design", error?.message);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to revise design",
       });
@@ -1416,8 +1420,12 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       if (billingService) {
         const creditCount = lifestyleImages.length || 1;
         for (let i = 0; i < creditCount; i++) {
-          billingService.recordUsage(session.shopDomain);
+          billingService.recordUsage(session.shopDomain, "finalize-product-image");
         }
+      }
+      // Log publish error (non-fatal) so it shows in usage log
+      if (billingService && publishError) {
+        billingService.recordError(session.shopDomain, "finalize-publish", publishError);
       }
 
       // If publish failed with 401, include reauth URL so frontend can auto-redirect
@@ -1453,6 +1461,7 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       });
     } catch (error) {
       log.error({ err: error?.message || error, stack: error?.stack }, "Finalize FATAL error");
+      if (billingService) billingService.recordError(session?.shopDomain, "finalize-product", error?.message);
       return res.status(500).json({
         error: error instanceof Error ? error.message : "Failed to finalize product",
       });

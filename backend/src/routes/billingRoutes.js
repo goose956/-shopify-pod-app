@@ -167,6 +167,21 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
     res.json(result);
   });
 
+  /* ── GET /billing/usage-log — credit usage & error log ─────────────── */
+  router.get("/usage-log", async (req, res) => {
+    const session = await requireShopifySession(req, res);
+    if (!session) return;
+
+    const log = billingService.getUsageLog(session.shopDomain);
+    const billing = billingService.getShopBilling(session.shopDomain);
+    res.json({
+      log: log.reverse(), // newest first
+      usage: billing.usage,
+      limits: billing.limits,
+      plan: billing.plan,
+    });
+  });
+
   return router;
 }
 

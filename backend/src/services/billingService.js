@@ -119,15 +119,52 @@ class BillingService {
   }
 
   /* ── Increment usage counter ───────────────────────────────────────── */
-  recordUsage(shopDomain) {
+  recordUsage(shopDomain, action = "unknown") {
     const settings = this.settingsRepository.findByShop(shopDomain) || {};
     const usage = this._getCurrentUsage(settings);
 
     usage.credits += 1;
 
+    // Append to usage log
+    const log = this._getUsageLog(settings);
+    log.push({
+      type: "credit",
+      action,
+      credits: 1,
+      total: usage.credits,
+      ts: new Date().toISOString(),
+    });
+
     this.settingsRepository.upsertByShop(shopDomain, {
       billingUsage: usage,
+      billingUsageLog: log.slice(-200), // keep last 200 entries
     });
+  }
+
+  /* ── Log an error (no credit charged) ──────────────────────────────── */
+  recordError(shopDomain, action, errorMessage) {
+    const settings = this.settingsRepository.findByShop(shopDomain) || {};
+    const log = this._getUsageLog(settings);
+    log.push({
+      type: "error",
+      action,
+      error: String(errorMessage || "Unknown error").slice(0, 500),
+      ts: new Date().toISOString(),
+    });
+
+    this.settingsRepository.upsertByShop(shopDomain, {
+      billingUsageLog: log.slice(-200),
+    });
+  }
+
+  /* ── Get the usage log for a shop ──────────────────────────────────── */
+  getUsageLog(shopDomain) {
+    const settings = this.settingsRepository.findByShop(shopDomain) || {};
+    return this._getUsageLog(settings);
+  }
+
+  _getUsageLog(settings) {
+    return Array.isArray(settings.billingUsageLog) ? [...settings.billingUsageLog] : [];
   }
 
   /* ── Create a Shopify subscription (returns confirmation URL) ─────── */

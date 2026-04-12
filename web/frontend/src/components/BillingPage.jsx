@@ -13,6 +13,7 @@ import {
   Spinner,
 } from "@shopify/polaris";
 import { getSessionToken } from "../utils/sessionToken";
+import { UsageLog } from "./UsageLog";
 
 const API_BASE = "/api/billing";
 
@@ -567,6 +568,9 @@ export function BillingPage() {
           </Modal.Section>
         </Modal>
       )}
+
+      {/* ── Usage Log ────────────────────────────────────────────────── */}
+      <UsageLog />
     </BlockStack>
   );
 }
