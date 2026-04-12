@@ -197,19 +197,6 @@ export function BillingPage() {
     }
   }, []);
 
-  const handleResetUsage = useCallback(async () => {
-    try {
-      setActionLoading("reset");
-      setError(null);
-      await apiFetch("/reset-usage", { method: "POST" });
-      await loadBilling();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setActionLoading(null);
-    }
-  }, [loadBilling]);
-
   const handleCancel = useCallback(async () => {
     try {
       setActionLoading("cancel");
@@ -370,9 +357,7 @@ export function BillingPage() {
               ? "You've used all your credits this month. Upgrade to a paid plan for more credits."
               : `Your credits reset in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}.`}
           </div>
-        )}        <div style={{ marginTop: 12 }}>
-          <Button size="slim" onClick={handleResetUsage} loading={actionLoading === "reset"}>Reset Credits (Testing)</Button>
-        </div>        {creditsUsed < creditsLimit && creditsUsed >= creditsLimit * 0.8 && (
+        )}        {creditsUsed < creditsLimit && creditsUsed >= creditsLimit * 0.8 && (
           <div
             style={{
               marginTop: 16,
