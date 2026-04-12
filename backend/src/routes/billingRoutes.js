@@ -157,6 +157,16 @@ function createBillingRouter({ authService, billingService, settingsRepository, 
     }
   });
 
+  /* ── POST /billing/check-credits — pre-flight credit check ─────────── */
+  router.post("/check-credits", async (req, res) => {
+    const session = await requireShopifySession(req, res);
+    if (!session) return;
+
+    const creditsNeeded = Math.max(1, Math.floor(Number(req.body?.creditsNeeded) || 1));
+    const result = billingService.canAfford(session.shopDomain, creditsNeeded);
+    res.json(result);
+  });
+
   return router;
 }
 

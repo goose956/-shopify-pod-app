@@ -1186,15 +1186,14 @@ function createPodRouter({ authService, memberAuthService, memberRepository, ana
       const lifestyleCount = Array.isArray(req.body?.lifestylePrompts) && req.body.lifestylePrompts.filter(Boolean).length > 0
         ? req.body.lifestylePrompts.filter(Boolean).length
         : 3; // default 3 lifestyle images
-      const check = billingService.canPerformAction(session.shopDomain, "finalize");
       const creditsNeeded = lifestyleCount;
-      const remaining = check.limit - check.current;
-      if (!check.allowed || remaining < creditsNeeded) {
+      const check = billingService.canAfford(session.shopDomain, creditsNeeded);
+      if (!check.allowed) {
         return res.status(403).json({
           error: check.isOnTrial
-            ? `Trial credit limit reached (${check.current}/${check.limit}). Need ${creditsNeeded} credits.`
-            : `Not enough credits (${remaining} remaining, need ${creditsNeeded}). Upgrade for more.`,
-          limitReached: true, isOnTrial: check.isOnTrial || false, usage: check,
+            ? `Trial credit limit reached (${check.current}/${check.limit}). Need ${creditsNeeded} credits but only ${check.remaining} remaining.`
+            : `Not enough credits (${check.remaining} remaining, need ${creditsNeeded}). Upgrade for more.`,
+          limitReached: true, isOnTrial: check.isOnTrial || false, creditsNeeded, remaining: check.remaining, usage: check,
         });
       }
     }

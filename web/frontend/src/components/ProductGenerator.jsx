@@ -323,6 +323,7 @@ export function ProductGenerator() {
     if (!referencePreview) return;
     setIsAnalyzing(true);
     setError(null);
+    if (!(await checkCreditsAvailable(1))) { setIsAnalyzing(false); return; }
     try {
       const sessionToken = await getSessionToken();
       const response = await fetch("/api/analyze-image", {
@@ -347,8 +348,33 @@ export function ProductGenerator() {
   const handleWinningProductTypeChange = useCallback((value) => setWinningProductType(value), []);
   const handleWinningImageShapeChange = useCallback((value) => setWinningImageShape(value), []);
 
+  /** Pre-flight credit check — returns true if enough credits, false otherwise (sets error). */
+  const checkCreditsAvailable = async (creditsNeeded = 1) => {
+    try {
+      const sessionToken = await getSessionToken();
+      const res = await fetch("/api/billing/check-credits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionToken}` },
+        body: JSON.stringify({ creditsNeeded }),
+      });
+      if (!res.ok) return true; // If check fails, let the action proceed (backend will enforce)
+      const data = await res.json();
+      if (!data.allowed) {
+        const msg = data.isOnTrial
+          ? `Not enough credits — you need ${data.creditsNeeded} but only have ${data.remaining} remaining during your trial. Your full ${data.fullLimit} credits unlock after the trial ends.`
+          : `Not enough credits — this action needs ${data.creditsNeeded} credit${data.creditsNeeded > 1 ? "s" : ""} but you only have ${data.remaining} remaining this month. Go to the Billing tab to upgrade or wait for your monthly reset.`;
+        setError(msg);
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return true; // If pre-check fails, let backend enforce
+    }
+  };
+
   const handleGenerateDesign = async () => {
     setError(null);
+    if (!(await checkCreditsAvailable(1))) return;
     setDesignImageUrl("");
     setRawArtworkUrl("");
     setDesignId("");
@@ -422,6 +448,7 @@ export function ProductGenerator() {
 
   const handleReviseDesign = async () => {
     setError(null);
+    if (!(await checkCreditsAvailable(1))) return;
     setIsGeneratingDesign(true);
     try {
       const sessionToken = await getSessionToken();
@@ -452,6 +479,7 @@ export function ProductGenerator() {
 
   const handleGenerateMockup = async () => {
     setError(null);
+    if (!(await checkCreditsAvailable(1))) return;
     setIsGeneratingMockup(true);
     try {
       const sessionToken = await getSessionToken();
@@ -480,6 +508,8 @@ export function ProductGenerator() {
 
   const handleApproveAndFinalize = async () => {
     setError(null);
+    const requestedCount = Math.max(1, Math.min(6, Number(lifestyleImageCount) || 3));
+    if (!(await checkCreditsAvailable(requestedCount))) return;
     setIsFinalizing(true);
     try {
       const sessionToken = await getSessionToken();
@@ -1056,6 +1086,7 @@ export function ProductGenerator() {
                             size="large"
                             onClick={async () => {
                               setError(null);
+                              if (!(await checkCreditsAvailable(1))) return;
                               setDesignImageUrl("");
                               setRawArtworkUrl("");
                               setDesignId("");

@@ -99,6 +99,25 @@ class BillingService {
     };
   }
 
+  /* ── Pre-flight check: can the shop afford N credits? ──────────────── */
+  canAfford(shopDomain, creditsNeeded) {
+    const billing = this.getShopBilling(shopDomain);
+    const { credits } = billing.usage;
+    const { effectiveLimit, creditsPerMonth } = billing.limits;
+    const remaining = effectiveLimit - credits;
+
+    return {
+      allowed: remaining >= creditsNeeded,
+      creditsNeeded,
+      remaining,
+      current: credits,
+      limit: effectiveLimit,
+      fullLimit: creditsPerMonth,
+      isOnTrial: billing.isOnTrial,
+      plan: billing.plan,
+    };
+  }
+
   /* ── Increment usage counter ───────────────────────────────────────── */
   recordUsage(shopDomain) {
     const settings = this.settingsRepository.findByShop(shopDomain) || {};
